@@ -4,6 +4,7 @@ build_from:
   amd64: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
   armv7: ghcr.io/home-assistant/armv7-base-python:3.13-alpine3.22
 args:
-  # Código do painel: tag (ou commit) do GitHub. Ao lançar uma versão, crie a tag app-v<version> e
-  # atualize este valor junto com `version` no config.yaml.
-  H50_REF: app-v0.1.0
+  # Commit (SHA completo) do original nathanabreu/H50-Pro-custom sobre o qual os patches de patches/ são aplicados.
+  # Ao mudar, os patches precisam aplicar sem conflito: use tools/update-upstream.sh <commit>, que testa, regera
+  # patches/ e atualiza este valor. Depois suba `version` no config.yaml e registre no CHANGELOG.md.
+  H50_COMMIT: b982e7294ce5e546d5ec67c17bc3d97902365864
