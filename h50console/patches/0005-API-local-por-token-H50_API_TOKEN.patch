@@ -1,0 +1,176 @@
+From 6b71f3797921e7938e28ba665e2e70021a1ccd10 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Thu, 22 Oct 2026 23:39:06 -0300
+Subject: [PATCH] API local por token (H50_API_TOKEN)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Para um processo do mesmo host, como a ponte MQTT do app do Home Assistant:
+com H50_API_TOKEN definido, "Authorization: Bearer <token>" vindo do IP real
+127.0.0.1 entra como administrador. X-Forwarded-For não conta, o X-H50 continua
+obrigatório e o token precisa ter pelo menos 32 caracteres. Sem a variável,
+nada muda.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/__main__.py |  4 +++-
+ h50console/config.py   |  5 +++++
+ h50console/web.py      | 19 +++++++++++++++----
+ tests/test_auth.py     | 31 +++++++++++++++++++++++++++++++
+ 4 files changed, 54 insertions(+), 5 deletions(-)
+
+diff --git a/h50console/__main__.py b/h50console/__main__.py
+index 7c466d5..ef19218 100644
+--- a/h50console/__main__.py
++++ b/h50console/__main__.py
+@@ -54,12 +54,14 @@ def serve(cfg: Config) -> int:
+     hub = Hub(fleet, fleet.cloud, cfg.raw_enabled, auth=auth, ring=ring, notifier=notifier)
+     srv = make_server(hub, cfg.host, cfg.port, auth=auth, trust_proxy=cfg.trust_proxy, cookie_secure=cfg.cookie_secure,
+                       extra_hosts=cfg.allowed_hosts, metrics_token=cfg.metrics_token, ingress=cfg.ingress,
+-                      ingress_only=cfg.ingress_only)
++                      ingress_only=cfg.ingress_only, api_token=cfg.api_token)
+ 
+     fleet.start_all()
+     names = ", ".join(f"{r.cfg.name} ({r.cfg.transport})" for r in fleet.robots.values()) or "nenhum (cadastre na interface)"
+     log.info("H50 Console %s | dados em %s | robôs: %s", __version__, cfg.data_dir, names)
+     log.info("painel em http://%s:%s  (Ctrl+C para sair)", cfg.host, cfg.port)
++    if cfg.api_token:
++        log.info("API local por token ligada (só de 127.0.0.1)")
+     if cfg.cloud_country:
+         log.info("nuvem Xiaomi: servidor fixo '%s' (H50_CLOUD_COUNTRY)", cfg.cloud_country)
+     if cfg.ingress:
+diff --git a/h50console/config.py b/h50console/config.py
+index 33839f9..1fd1e19 100644
+--- a/h50console/config.py
++++ b/h50console/config.py
+@@ -45,6 +45,7 @@ class Config:
+     ingress: bool = False              # H50_INGRESS: app do Home Assistant; o gateway do Ingress conta como administrador
+     ingress_only: bool = False         # H50_INGRESS_ONLY: recusa quem não vem do Ingress (nem do loopback)
+     log_level: str = "INFO"            # H50_LOG_LEVEL: DEBUG, INFO, WARNING ou ERROR
++    api_token: str = ""                # H50_API_TOKEN: Bearer de administrador, só de 127.0.0.1 (ponte MQTT do app do HA)
+     cloud_country: str = ""            # H50_CLOUD_COUNTRY: servidor da nuvem Xiaomi (us, de, sg...); vazio/auto = descobre
+     # migração de instalações de um robô só (usados apenas se não houver robots.json)
+     ip: str = ""
+@@ -58,6 +59,9 @@ class Config:
+         token = e.get("H50_TOKEN", "")
+         if token and len(token) != 32:
+             raise SystemExit("H50_TOKEN deve ter 32 caracteres hexadecimais")
++        api_token = e.get("H50_API_TOKEN", "").strip()
++        if api_token and len(api_token) < 32:
++            raise SystemExit("H50_API_TOKEN precisa ter pelo menos 32 caracteres")
+         from .cloud import COUNTRIES
+         country = e.get("H50_CLOUD_COUNTRY", "").strip().lower()
+         country = "" if country == "auto" else country
+@@ -76,6 +80,7 @@ class Config:
+             allowed_hosts=tuple(h.strip().lower() for h in e.get("H50_ALLOWED_HOSTS", "").split(",") if h.strip()),
+             ingress=_bool(e.get("H50_INGRESS")), ingress_only=_bool(e.get("H50_INGRESS_ONLY")),
+             log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO", cloud_country=country,
++            api_token=api_token,
+             ip=e.get("H50_IP", ""), token=token, device_name=e.get("H50_NAME", ""),
+         )
+ 
+diff --git a/h50console/web.py b/h50console/web.py
+index 72f8c25..5e9fd1e 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -622,12 +622,15 @@ CSP = ("default-src 'self'; img-src 'self' data: https://*.xiaomi.com; style-src
+ # Ingress do Home Assistant: o Supervisor repassa os pedidos (já autenticados pelo HA) sempre deste IP, e o painel abre
+ # num iframe da mesma origem do HA. Só as respostas a ele mudam o enquadramento.
+ INGRESS_GATEWAY = "172.30.32.2"
++# H50_API_TOKEN: um processo do mesmo host (a ponte MQTT do app do HA) entra como administrador com
++# "Authorization: Bearer <token>", só a partir deste IP (o socket real; X-Forwarded-For não vale).
++API_TOKEN_SOURCE = "127.0.0.1"
+ CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+ 
+ 
+ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool = False, local_only: bool = False,
+                  extra_hosts=(), metrics_token: str = "", ingress: bool = False, ingress_only: bool = False,
+-                 ingress_gateway: str = INGRESS_GATEWAY):
++                 ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "", api_token_source: str = API_TOKEN_SOURCE):
+     streams = {"n": 0}
+     streams_lock = threading.Lock()
+     class Handler(BaseHTTPRequestHandler):
+@@ -725,8 +728,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+                 return None, "JSON inválido"
+ 
+         # -- autenticação ----------------------------------------------------------------------------
++        def _from_api_token(self) -> bool:
++            if not api_token or self.client_address[0] != api_token_source:
++                return False
++            got = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
++            return hmac.compare_digest(got.encode(), api_token.encode())
++
+         def _role(self) -> str | None:
+-            if auth is None or not auth.enabled or self._from_gateway():
++            if auth is None or not auth.enabled or self._from_gateway() or self._from_api_token():
+                 return "admin"
+             return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
+ 
+@@ -927,10 +936,12 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+ 
+ def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,
+                 cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "", ingress: bool = False,
+-                ingress_only: bool = False, ingress_gateway: str = INGRESS_GATEWAY) -> ThreadingHTTPServer:
++                ingress_only: bool = False, ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "",
++                api_token_source: str = API_TOKEN_SOURCE) -> ThreadingHTTPServer:
+     local_only = is_loopback(host) and not trust_proxy
+     srv = ThreadingHTTPServer((host, port), make_handler(hub, auth, trust_proxy, cookie_secure, local_only,
+                                                          {h.lower() for h in extra_hosts}, metrics_token,
+-                                                         ingress, ingress_only and ingress, ingress_gateway))
++                                                         ingress, ingress_only and ingress, ingress_gateway,
++                                                         api_token, api_token_source))
+     srv.daemon_threads = True
+     return srv
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 02e72e0..5ac30a2 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -369,6 +369,19 @@ class AuthHttp(unittest.TestCase):
+         self.assertEqual(s.req("POST", "/api/auth/password", {"current": "x", "new": "y"}, headers={"X-H50": "1"})[0], 401)
+ 
+ 
++class ApiTokenConfig(unittest.TestCase):
++    def test_api_token_must_be_long(self):
++        import os
++        from unittest import mock
++        from h50console.config import Config
++        with mock.patch.dict(os.environ, {"H50_API_TOKEN": ""}):
++            self.assertEqual(Config.from_env("/nao/existe/.env").api_token, "")
++        with mock.patch.dict(os.environ, {"H50_API_TOKEN": "a" * 32}):
++            self.assertEqual(Config.from_env("/nao/existe/.env").api_token, "a" * 32)
++        with mock.patch.dict(os.environ, {"H50_API_TOKEN": "curto"}), self.assertRaises(SystemExit):
++            Config.from_env("/nao/existe/.env")
++
++
+ if __name__ == "__main__":
+     unittest.main()
+ 
+@@ -436,6 +449,24 @@ class IngressHttp(unittest.TestCase):
+         self.assertEqual(s.req("GET", "/api/auth/status")[0], 200)              # loopback (healthcheck)
+         self.assertEqual(s.req("GET", "/api/robots")[0], 401)                   # ...mas continua exigindo senha
+ 
++    def test_api_token_is_admin_only_from_127_0_0_1(self):
++        token = "t" * 40
++        s = Server(self, api_token=token, ingress=True, ingress_only=True, ingress_gateway=GW)
++        bearer = {"Authorization": f"Bearer {token}", "X-H50": "1"}
++        st, _, r = s.req("GET", "/api/robots", headers=bearer)
++        self.assertEqual(st, 200)
++        self.assertEqual(r.getheader("X-Frame-Options"), "DENY")              # não é o Ingress: não enquadra
++        _, st, _ = s.req("GET", "/api/auth/status", headers=bearer)
++        self.assertEqual((st["authenticated"], st["role"]), (True, "admin"))
++        self.assertNotEqual(s.req("POST", "/api/robots", {}, headers=bearer)[0], 403)
++        self.assertEqual(s.req("POST", "/api/robots", {}, headers={**bearer, "X-H50": ""})[0], 403)   # CSRF continua
++        self.assertEqual(s.req("GET", "/api/robots", headers={**bearer, "Authorization": "Bearer errado"})[0], 401)
++        self.assertEqual(s.req("GET", "/api/robots")[0], 401)
++        # de outro IP (aqui 127.0.0.2, que nem passa do ingress_only) o token não vale, nem com X-Forwarded-For
++        s2 = Server(self, api_token=token, trust_proxy=True)
++        st, _, _ = s2.req("GET", "/api/robots", headers={**bearer, "X-Forwarded-For": "127.0.0.1"}, source=OTHER)
++        self.assertEqual(st, 401)
++
+     def test_without_ingress_nothing_changes(self):
+         s = Server(self, ingress_gateway=GW)                       # mesmo IP, modo desligado: é um cliente qualquer
+         st, _, r = s.req("GET", "/api/robots", source=GW)
+-- 
+2.53.0
+
