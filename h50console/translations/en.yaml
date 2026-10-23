@@ -13,5 +13,13 @@ configuration:
     description: >-
       Server where the robot is registered in the Xiaomi account (used only for the map and setup). auto = detect.
       us = USA, de = Europe, sg = Singapore, cn = China, ru = Russia, i2 = India.
+  mqtt:
+    name: MQTT integration
+    description: >-
+      Adds the robot as a Home Assistant device (vacuum, battery, consumables, dock buttons) through the Mosquitto
+      broker app. Fully local: commands go through the panel and reach the robot over the LAN.
+  mqtt_discovery_prefix:
+    name: MQTT discovery prefix
+    description: Only change it if you changed the prefix in the Home Assistant MQTT integration (default homeassistant).
   log_level:
     name: Log level

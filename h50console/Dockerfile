@@ -44,6 +44,10 @@ ENV PYTHONDONTWRITEBYTECODE=1
 COPY --from=src /src /src
 WORKDIR /src
 RUN python3 -m unittest -v
+# ponte MQTT do app (usa o código do painel já com patch; não precisa do paho)
+COPY mqtt_bridge.py /app-src/
+COPY tests/ /app-src/tests/
+RUN PYTHONPATH=/src:/app-src python3 -m unittest discover -v -s /app-src/tests
 
 # ---- imagem final ---------------------------------------------------------------------------------------------------
 FROM ${BUILD_FROM}
@@ -51,8 +55,10 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY --from=src /src/pyproject.toml /src/README.md /src/LICENSE ./
 COPY --from=src /src/h50console ./h50console
-RUN pip install --no-cache-dir . && rm -rf /app/build
-COPY run.py /run.py
+RUN pip install --no-cache-dir . paho-mqtt==2.1.0 && rm -rf /app/build
+COPY run.py mqtt_bridge.py /
+ARG BUILD_VERSION
+ENV H50_APP_VERSION=${BUILD_VERSION}
 
 # /data é persistente e entra no backup do HA (tokens, bancos, sessão da nuvem, mapas)
 CMD ["python3", "/run.py"]

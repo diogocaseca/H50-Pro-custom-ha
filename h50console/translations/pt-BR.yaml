@@ -13,5 +13,13 @@ configuration:
     description: >-
       Servidor em que o robô está na conta Xiaomi (só para o mapa e o cadastro). auto = descobre sozinho.
       us = EUA (contas do Brasil), de = Europa, sg = Singapura, cn = China, ru = Rússia, i2 = Índia.
+  mqtt:
+    name: Integração MQTT
+    description: >-
+      Cria o robô como dispositivo no Home Assistant (aspirador, bateria, consumíveis, botões da base) pelo app
+      Mosquitto broker. Tudo local: os comandos passam pelo painel e vão ao robô pela rede local.
+  mqtt_discovery_prefix:
+    name: Prefixo do MQTT discovery
+    description: Só mude se alterou o prefixo na integração MQTT do Home Assistant (padrão homeassistant).
   log_level:
     name: Nível de log

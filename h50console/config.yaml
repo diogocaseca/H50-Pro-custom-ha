@@ -1,6 +1,6 @@
 # App do Home Assistant (antigo "add-on"). Documentação: DOCS.md
 name: H50 Console
-version: "0.1.2"
+version: "0.2.0"
 slug: h50console
 description: Painel local para aspiradores Xiaomi H50 Pro (controle pela rede local; nuvem só para o mapa)
 url: https://github.com/diogocaseca/H50-Pro-custom-ha
@@ -26,13 +26,20 @@ host_network: true
 # TCP de propósito: /api/health exige login e depende do robô (robô desligado reiniciaria o app à toa).
 watchdog: tcp://[HOST]:[PORT:8050]
 backup: hot
+# Ponte MQTT (opção mqtt): os dados do broker vêm do Supervisor (app Mosquitto), se houver
+services:
+  - mqtt:want
 options:
   direct_access: false
   cloud_region: auto
+  mqtt: false
+  mqtt_discovery_prefix: homeassistant
   log_level: info
 schema:
   password: password?
   viewer_password: password?
   direct_access: bool
   cloud_region: list(auto|us|de|sg|cn|ru|i2)
+  mqtt: bool
+  mqtt_discovery_prefix: match(^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$)
   log_level: list(debug|info|warning|error)
