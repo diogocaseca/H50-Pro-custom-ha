@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Watchdog do Supervisor: checagem TCP da porta 8050; com o interruptor **Watchdog** ligado, o HA reinicia o app se o
+  painel parar de aceitar conexões (o reinício quando o processo cai já funcionava).
+
 ## 0.1.0
 
 - Primeira versão como app do Home Assistant: painel na barra lateral via Ingress (login e HTTPS do HA),

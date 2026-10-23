@@ -1,6 +1,6 @@
 # App do Home Assistant (antigo "add-on"). Documentação: DOCS.md
 name: H50 Console
-version: "0.1.0"
+version: "0.1.1"
 slug: h50console
 description: Painel local para aspiradores Xiaomi H50 Pro (controle pela rede local; nuvem só para o mapa)
 url: https://github.com/diogocaseca/H50-Pro-custom-ha
@@ -22,6 +22,9 @@ panel_admin: true
 # Com a rede do host o Docker não mapeia portas: a 8050 fica aberta na LAN de qualquer jeito. Por isso o acesso
 # direto é controlado pela opção direct_access (desligada = o app recusa quem não vem do Ingress).
 host_network: true
+# Watchdog do Supervisor (com o interruptor Watchdog ligado): reinicia o app se a porta 8050 parar de aceitar conexões.
+# TCP de propósito: /api/health exige login e depende do robô (robô desligado reiniciaria o app à toa).
+watchdog: tcp://[HOST]:[PORT:8050]
 backup: hot
 options:
   direct_access: false
