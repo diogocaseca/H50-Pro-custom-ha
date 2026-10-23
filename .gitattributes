@@ -1,0 +1,2 @@
+# Patches aplicados com patch(1)/git am: sem conversão de fim de linha
+*.patch -text

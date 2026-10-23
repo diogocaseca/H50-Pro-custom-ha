@@ -1,0 +1,246 @@
+From a1d66df86591f73b69f7b74ab53146a99df0592d Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Thu, 22 Oct 2026 22:30:47 -0300
+Subject: [PATCH 1/3] =?UTF-8?q?Front:=20caminhos=20relativos=20para=20roda?=
+ =?UTF-8?q?r=20atr=C3=A1s=20de=20um=20prefixo?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+fetch/EventSource/login/logout/service worker/manifest deixam de assumir a raiz
+("/api/..." -> "api/..."), para o painel funcionar atrás de um proxy em /h50/
+ou do Ingress do Home Assistant (sem <base href>, que o CSP base-uri 'none' bloqueia).
+Os chamadores continuam usando o caminho lógico /api/...; url()/rel() tiram a barra.
+O next do login passa a ser relativo (./#aba) e o sw.js compara a API com o escopo.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/static/app.js               | 19 +++++++++++--------
+ h50console/static/index.html           |  6 +++---
+ h50console/static/login.html           |  8 ++++----
+ h50console/static/login.js             |  8 ++++----
+ h50console/static/maint.js             |  6 +++---
+ h50console/static/manifest.webmanifest | 10 +++++-----
+ h50console/static/sw.js                |  6 ++++--
+ 7 files changed, 34 insertions(+), 29 deletions(-)
+
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index 19b238d..46e0a24 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -10,11 +10,14 @@
+ 
+   // ---- API ----------------------------------------------------------------------------
+   // Rotas da CONTA (robôs, nuvem, app) não levam o prefixo do robô; as demais vão para /api/r/<robô>/...
++  // Os chamadores usam o caminho lógico ("/api/..."); a requisição sai RELATIVA ("api/...") para o painel funcionar
++  // atrás de um prefixo (proxy em /h50/, Ingress do Home Assistant).
+   let robotId = null;
++  const rel = (path) => path.replace(/^\//, "");
+   const ACCOUNT = /^\/api\/(robots(\/|$)|cloud\/(status|qr|logout|devices)$|app$|auth\/|maintenance\/|backup\/|notify(\/|$))/;   // /api/export/... é do robô ativo
+   const url = (path) => {
+     const p = path.split("?")[0];
+-    return ACCOUNT.test(p) || !robotId ? path : path.replace(/^\/api\//, `/api/r/${robotId}/`);
++    return rel(ACCOUNT.test(p) || !robotId ? path : path.replace(/^\/api\//, `/api/r/${robotId}/`));
+   };
+   async function showPath(r) {
+     const box = el("div", { textContent: "Carregando…" });
+@@ -36,7 +39,7 @@
+     });
+     const data = await r.json().catch(() => ({}));
+     if (r.status === 401 && data.login) {          // sessão expirada ou ausente: volta para o login
+-      location.href = "/login.html?next=" + encodeURIComponent(location.pathname + location.hash);
++      location.href = "login.html?next=" + encodeURIComponent("./" + location.hash);
+       throw new Error("login necessário");
+     }
+     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+@@ -603,12 +606,12 @@
+   function connect() {
+     for (const s of streams) s.close();
+     streams = [];
+-    const acc = new EventSource("/api/stream");              // eventos da conta (nuvem, robôs)
++    const acc = new EventSource(rel("/api/stream"));              // eventos da conta (nuvem, robôs)
+     streams.push(acc);
+     acc.addEventListener("cloud", () => { if (current() === "inicio") renderHomeMap(); else if (current() === "robos") refresh(); });
+     acc.addEventListener("robots", async () => { await reloadRobots(); if (current() === "robos") refresh(); });
+     if (!robotId) return;
+-    const es = new EventSource(`/api/r/${robotId}/stream`);  // eventos do robô ativo
++    const es = new EventSource(rel(`/api/r/${robotId}/stream`));  // eventos do robô ativo
+     streams.push(es);
+     es.addEventListener("state", async (e) => {
+       const d = JSON.parse(e.data || "{}");
+@@ -716,7 +719,7 @@
+     });
+ 
+     // segurança: senha e sessões
+-    const auth = await fetch("/api/auth/status").then((r) => r.json()).catch(() => ({ enabled: false }));
++    const auth = await fetch(rel("/api/auth/status")).then((r) => r.json()).catch(() => ({ enabled: false }));
+     $("#sec-card").hidden = !auth.enabled;
+     document.body.classList.toggle("viewer", auth.role === "viewer");
+     if (auth.role === "viewer") $("#sec-note").textContent = "Você entrou com o perfil somente leitura.";
+@@ -743,7 +746,7 @@
+         confirm: async () => { await api("POST", "/api/auth/password", { current: cur.value, new: nw.value }); toast("Senha alterada"); },
+       });
+     };
+-    $("#sec-out").onclick = async () => { await api("POST", "/api/auth/logout", {}).catch(() => {}); location.href = "/login.html"; };
++    $("#sec-out").onclick = async () => { await api("POST", "/api/auth/logout", {}).catch(() => {}); location.href = "login.html"; };
+     $("#sec-all").onclick = () => confirmAction("Sair de todos os aparelhos? Este também continua conectado.",
+       () => run("Sair de todos", () => api("POST", "/api/auth/revoke", {})));
+ 
+@@ -770,13 +773,13 @@
+     if (sheets[qs.get("sheet")]) await sheets[qs.get("sheet")]();
+     if (!qs.has("static")) {
+       connect();
+-      if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => { /* sem HTTPS: tudo bem */ });
++      if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => { /* sem HTTPS: tudo bem */ });
+     }
+     setInterval(renderHeader, 10000);   // atualiza o "há X s"
+   }
+   // espaço de nomes para as telas em outros arquivos (robots.js)
+   window.H50 = {
+-    $, el, api, download, toast, run, openSheet, confirmAction, chip, views, fmtDate, ago, reloadRobots, setRobot,
++    $, el, api, download, rel, toast, run, openSheet, confirmAction, chip, views, fmtDate, ago, reloadRobots, setRobot,
+     get robotId() { return robotId; }, get robots() { return robots; }, get rawEnabled() { return !!appInfo?.raw_enabled; },
+   };
+   window.addEventListener("load", init);      // depois de todos os scripts terem registrado suas telas
+diff --git a/h50console/static/index.html b/h50console/static/index.html
+index e184377..321f656 100644
+--- a/h50console/static/index.html
++++ b/h50console/static/index.html
+@@ -5,9 +5,9 @@
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>H50 Console</title>
+ <link rel="stylesheet" href="style.css">
+-<link rel="manifest" href="/manifest.webmanifest">
+-<link rel="icon" href="/icon.svg" type="image/svg+xml">
+-<link rel="apple-touch-icon" href="/icon-192.png">
++<link rel="manifest" href="manifest.webmanifest">
++<link rel="icon" href="icon.svg" type="image/svg+xml">
++<link rel="apple-touch-icon" href="icon-192.png">
+ <meta name="theme-color" content="#2f6fde">
+ <meta name="mobile-web-app-capable" content="yes">
+ </head>
+diff --git a/h50console/static/login.html b/h50console/static/login.html
+index 578282c..4477a11 100644
+--- a/h50console/static/login.html
++++ b/h50console/static/login.html
+@@ -4,9 +4,9 @@
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>Entrar · H50 Console</title>
+-<link rel="manifest" href="/manifest.webmanifest">
+-<link rel="icon" href="/icon.svg" type="image/svg+xml">
+-<link rel="apple-touch-icon" href="/icon-192.png">
++<link rel="manifest" href="manifest.webmanifest">
++<link rel="icon" href="icon.svg" type="image/svg+xml">
++<link rel="apple-touch-icon" href="icon-192.png">
+ <meta name="theme-color" content="#2f6fde">
+ <meta name="mobile-web-app-capable" content="yes">
+ <style>
+@@ -38,6 +38,6 @@
+     <button id="go" type="submit">Entrar</button>
+   </form>
+ </main>
+-<script src="/login.js"></script>
++<script src="login.js"></script>
+ </body>
+ </html>
+diff --git a/h50console/static/login.js b/h50console/static/login.js
+index dcbd2e7..706b082 100644
+--- a/h50console/static/login.js
++++ b/h50console/static/login.js
+@@ -2,14 +2,14 @@
+ (function () {
+   const $ = (s) => document.querySelector(s);
+   const params = new URLSearchParams(location.search);
+-  // só aceita voltar para um caminho DENTRO do app (evita redirecionamento aberto)
++  // só aceita voltar para um caminho RELATIVO dentro do app (evita redirecionamento aberto e funciona atrás de prefixo)
+   const next = (() => {
+-    const n = params.get("next") || "/";
+-    return n.startsWith("/") && !n.startsWith("//") && !n.includes("\\") ? n : "/";
++    const n = params.get("next") || "./";
++    return /^\.\/(?![\/\\])/.test(n) && !n.includes("\\") ? n : "./";
+   })();
+ 
+   async function call(path, body) {
+-    const r = await fetch(path, {
++    const r = await fetch(path.replace(/^\//, ""), {     // relativo: funciona atrás de prefixo
+       method: body ? "POST" : "GET",
+       headers: { "X-H50": "1", ...(body ? { "Content-Type": "application/json" } : {}) },
+       body: body ? JSON.stringify(body) : undefined,
+diff --git a/h50console/static/maint.js b/h50console/static/maint.js
+index f647bb3..45b6a62 100644
+--- a/h50console/static/maint.js
++++ b/h50console/static/maint.js
+@@ -1,7 +1,7 @@
+ // Tela "Manutenção": espaço, retenção, otimização, backup/restauração, exportação, logs e diagnóstico.
+ (function () {
+   const H = window.H50;
+-  const { $, el, api, toast, run, openSheet, confirmAction } = H;
++  const { $, el, api, rel, toast, run, openSheet, confirmAction } = H;
+ 
+   const bytes = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+   const upt = (s) => s >= 86400 ? `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h` : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : `${Math.floor(s / 60)} min`;
+@@ -65,11 +65,11 @@
+       if (!f) return toast("Escolha o arquivo .h50bak", true);
+       confirmAction("Restaurar substitui os dados atuais (robôs, históricos, senha do painel e sessão da nuvem) pelos do backup. Você precisará entrar de novo.",
+         () => run("Restaurar", async () => {
+-          const r = await fetch("/api/backup/restore", { method: "POST", headers: { "X-H50": "1", "X-H50-Passphrase": pw }, body: f });
++          const r = await fetch(rel("/api/backup/restore"), { method: "POST", headers: { "X-H50": "1", "X-H50-Passphrase": pw }, body: f });
+           const d = await r.json().catch(() => ({}));
+           if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+           toast(`Restaurado: ${d.robots.length} robô(s)`);
+-          setTimeout(() => { location.href = "/"; }, 1200);
++          setTimeout(() => { location.href = "./"; }, 1200);
+         }));
+     };
+ 
+diff --git a/h50console/static/manifest.webmanifest b/h50console/static/manifest.webmanifest
+index db509a9..6be4671 100644
+--- a/h50console/static/manifest.webmanifest
++++ b/h50console/static/manifest.webmanifest
+@@ -3,14 +3,14 @@
+   "short_name": "H50",
+   "description": "Painel para aspiradores robô Xiaomi",
+   "lang": "pt-BR",
+-  "start_url": "/",
+-  "scope": "/",
++  "start_url": "./",
++  "scope": "./",
+   "display": "standalone",
+   "background_color": "#14171d",
+   "theme_color": "#2f6fde",
+   "icons": [
+-    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+-    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+-    {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}
++    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
++    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
++    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}
+   ]
+ }
+diff --git a/h50console/static/sw.js b/h50console/static/sw.js
+index a9351f0..1d13750 100644
+--- a/h50console/static/sw.js
++++ b/h50console/static/sw.js
+@@ -1,6 +1,8 @@
+ // Service worker: o app abre mesmo sem rede (mostra a última tela) e pode ser instalado no celular.
+ // A API nunca passa por aqui: dados do robô vêm sempre da rede. Páginas e scripts: rede primeiro, cache de reserva.
+-const CACHE = "h50-shell-v2";
++const CACHE = "h50-shell-v3";
++// a API fica em <escopo>/api/ (o escopo é a pasta do sw.js: "/" ou o prefixo do proxy/Ingress)
++const API = new URL("api/", self.registration.scope).pathname;
+ 
+ self.addEventListener("install", () => self.skipWaiting());
+ 
+@@ -14,7 +16,7 @@ self.addEventListener("activate", (event) => {
+ self.addEventListener("fetch", (event) => {
+   const req = event.request;
+   const url = new URL(req.url);
+-  if (req.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
++  if (req.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith(API)) return;
+   event.respondWith((async () => {
+     try {
+       const res = await fetch(req);
+-- 
+2.53.0
+

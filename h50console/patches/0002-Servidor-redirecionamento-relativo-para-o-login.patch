@@ -1,0 +1,62 @@
+From 4f1fe80f010a68eed8df4c241ee59ef1595e429f Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Thu, 22 Oct 2026 22:30:47 -0300
+Subject: [PATCH 2/3] Servidor: redirecionamento relativo para o login
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O 302 para o login sobe até a raiz do app com ../ em vez de usar /login.html,
+então funciona atrás de qualquer prefixo. Na raiz resolve para o mesmo endereço.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/web.py  | 4 +++-
+ tests/test_auth.py | 8 ++++++--
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/h50console/web.py b/h50console/web.py
+index 9644a04..14efa32 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -798,7 +798,9 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+                 if not self._authed():
+                     if path.startswith("/api/"):
+                         return self._send(401, {"error": "login necessário", "login": True})
+-                    return self._redirect("/login.html?next=" + quote(self.path, safe=""))
++                    # relativo (sobe até a raiz do app): funciona atrás de um prefixo (proxy em /h50/, Ingress do HA)
++                    up = "../" * (path.count("/") - 1)
++                    return self._redirect(up + "login.html?next=" + quote("./" + self.path.lstrip("/"), safe=""))
+                 if method != "GET" and not self._csrf_ok():
+                     return self._send(403, {"error": "requisição bloqueada (CSRF)"})
+                 if self._role() == "viewer" and not ((method == "GET" and (VIEWER_GET.fullmatch(path) or not path.startswith("/api/")))
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 7847548..6e164a1 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -232,8 +232,11 @@ class AuthHttp(unittest.TestCase):
+         st, body, _ = s.req("GET", "/api/robots")
+         self.assertEqual((st, body["login"]), (401, True))
+         st, _, r = s.req("GET", "/")
+-        self.assertEqual((st, r.getheader("Location")), (302, "/login.html?next=%2F"))
++        self.assertEqual((st, r.getheader("Location")), (302, "login.html?next=.%2F"))
+         self.assertEqual(s.req("GET", "/app.js")[0], 302)
++        # redirecionamento relativo: sobe até a raiz do app (funciona atrás de um prefixo de proxy/Ingress)
++        _, _, r = s.req("GET", "/x/y?a=1")
++        self.assertEqual(r.getheader("Location"), "../login.html?next=.%2Fx%2Fy%3Fa%3D1")
+         self.assertEqual(s.req("GET", "/api/r/x/stream")[0], 401)
+         self.assertEqual(s.req("GET", "/login.html")[0], 200)
+         self.assertEqual(s.req("GET", "/login.js")[0], 200)
+@@ -247,7 +250,8 @@ class AuthHttp(unittest.TestCase):
+             self.assertIn(ctype, r.getheader("Content-Type"), path)
+         manifest = s.req("GET", "/manifest.webmanifest")[1]                # a resposta já vem como JSON
+         self.assertEqual(manifest["display"], "standalone")
+-        self.assertTrue(all(i["src"].startswith("/icon") for i in manifest["icons"]))
++        self.assertTrue(all(i["src"].startswith("icon") for i in manifest["icons"]))      # relativos: funcionam atrás de prefixo
++        self.assertEqual((manifest["start_url"], manifest["scope"]), ("./", "./"))
+         self.assertEqual(s.req("GET", "/app.js")[0], 302)            # o resto do app continua atrás do login
+         self.assertEqual(s.req("GET", "/api/state")[0], 401)
+ 
+-- 
+2.53.0
+

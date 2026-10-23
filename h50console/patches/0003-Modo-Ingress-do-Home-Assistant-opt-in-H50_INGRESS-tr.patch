@@ -1,0 +1,356 @@
+From fbb57f4e614f44639526f327805ad75bcd8300fb Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Thu, 22 Oct 2026 22:32:53 -0300
+Subject: [PATCH 3/3] Modo Ingress do Home Assistant (opt-in: H50_INGRESS=true)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Com H50_INGRESS=true, pedidos cujo IP REAL do socket é o gateway do Ingress
+(172.30.32.2) contam como administrador (o HA já autenticou), podem ser
+enquadrados no iframe (X-Frame-Options SAMEORIGIN, frame-ancestors 'self') e o
+Origin pode ser o X-Forwarded-Host do HA. X-H50 continua obrigatório.
+Qualquer outra origem segue exatamente como antes (senha, DENY, 'none').
+
+H50_INGRESS_ONLY recusa quem não vem do gateway nem do loopback (no app do HA
+a rede do host deixa a porta aberta na LAN). H50_LOG_LEVEL ajusta o log.
+Sem as variáveis, nada muda.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/__main__.py   | 15 ++++++--
+ h50console/config.py     |  5 +++
+ h50console/static/app.js |  1 +
+ h50console/web.py        | 45 +++++++++++++++-------
+ tests/test_auth.py       | 80 ++++++++++++++++++++++++++++++++++++++--
+ 5 files changed, 126 insertions(+), 20 deletions(-)
+
+diff --git a/h50console/__main__.py b/h50console/__main__.py
+index 994ea52..381e54a 100644
+--- a/h50console/__main__.py
++++ b/h50console/__main__.py
+@@ -22,7 +22,7 @@ from .config import Config
+ from .fleet import Fleet
+ from .hub import Hub
+ from .notify import Notifier, NotifyStore
+-from .web import make_server
++from .web import INGRESS_GATEWAY, make_server
+ 
+ 
+ def _passphrase(confirm: bool = False) -> str:
+@@ -46,18 +46,24 @@ def serve(cfg: Config) -> int:
+     if not cfg.auth_enabled and not is_loopback(cfg.host):
+         raise SystemExit(f"Recusado: H50_AUTH=off só é permitido em localhost (H50_HOST={cfg.host}). "
+                          "Ative a senha (padrão) ou use H50_HOST=127.0.0.1.")
++    if cfg.ingress_only and not cfg.ingress:
++        raise SystemExit("H50_INGRESS_ONLY só faz sentido com H50_INGRESS=true.")
+     auth = Auth(cfg.data_dir, enabled=cfg.auth_enabled, env_password=cfg.password, viewer_password=cfg.viewer_password)
+     fleet = _fleet(cfg, start_threads=True)     # robots.json; migra instalação antiga ou H50_IP/H50_TOKEN na 1ª vez
+     notifier = Notifier(NotifyStore(cfg.data_dir / "notify.json"))
+     hub = Hub(fleet, fleet.cloud, cfg.raw_enabled, auth=auth, ring=ring, notifier=notifier)
+     srv = make_server(hub, cfg.host, cfg.port, auth=auth, trust_proxy=cfg.trust_proxy, cookie_secure=cfg.cookie_secure,
+-                      extra_hosts=cfg.allowed_hosts, metrics_token=cfg.metrics_token)
++                      extra_hosts=cfg.allowed_hosts, metrics_token=cfg.metrics_token, ingress=cfg.ingress,
++                      ingress_only=cfg.ingress_only)
+ 
+     fleet.start_all()
+     names = ", ".join(f"{r.cfg.name} ({r.cfg.transport})" for r in fleet.robots.values()) or "nenhum (cadastre na interface)"
+     log.info("H50 Console %s | dados em %s | robôs: %s", __version__, cfg.data_dir, names)
+     log.info("painel em http://%s:%s  (Ctrl+C para sair)", cfg.host, cfg.port)
+-    if auth.enabled and auth.setup_code:
++    if cfg.ingress:
++        log.info("modo Ingress (Home Assistant): pedidos do gateway %s entram sem senha%s", INGRESS_GATEWAY,
++                 "; acesso direto DESLIGADO" if cfg.ingress_only else "; acesso direto exige a senha")
++    if auth.enabled and auth.setup_code and not cfg.ingress_only:
+         log.warning("PRIMEIRO ACESSO: abra o painel e crie a senha com o código  %s", auth.setup_code)
+     elif not auth.enabled:
+         log.warning("autenticação DESLIGADA (H50_AUTH=off): qualquer pessoa que alcance %s:%s controla o robô", cfg.host, cfg.port)
+@@ -94,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
+         from . import mcp
+         return mcp.main()
+     cfg = Config.from_env()
++    if cfg.log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
++        raise SystemExit(f"H50_LOG_LEVEL inválido: {cfg.log_level} (use DEBUG, INFO, WARNING ou ERROR)")
++    logging.getLogger().setLevel(cfg.log_level)
+ 
+     if args.cmd == "version":
+         print(__version__)
+diff --git a/h50console/config.py b/h50console/config.py
+index aa8ff71..1df8920 100644
+--- a/h50console/config.py
++++ b/h50console/config.py
+@@ -42,6 +42,9 @@ class Config:
+     viewer_password: str = ""          # H50_VIEWER_PASSWORD: senha do perfil somente leitura (Docker)
+     metrics_token: str = ""            # H50_METRICS_TOKEN: libera /metrics (Prometheus) com 'Authorization: Bearer <token>'
+     allowed_hosts: tuple = ()          # H50_ALLOWED_HOSTS: nomes extras aceitos no Host (só vale em localhost sem proxy)
++    ingress: bool = False              # H50_INGRESS: app do Home Assistant; o gateway do Ingress conta como administrador
++    ingress_only: bool = False         # H50_INGRESS_ONLY: recusa quem não vem do Ingress (nem do loopback)
++    log_level: str = "INFO"            # H50_LOG_LEVEL: DEBUG, INFO, WARNING ou ERROR
+     # migração de instalações de um robô só (usados apenas se não houver robots.json)
+     ip: str = ""
+     token: str = ""
+@@ -65,6 +68,8 @@ class Config:
+             cookie_secure=_bool(e.get("H50_COOKIE_SECURE")),
+             viewer_password=e.get("H50_VIEWER_PASSWORD", ""), metrics_token=e.get("H50_METRICS_TOKEN", ""),
+             allowed_hosts=tuple(h.strip().lower() for h in e.get("H50_ALLOWED_HOSTS", "").split(",") if h.strip()),
++            ingress=_bool(e.get("H50_INGRESS")), ingress_only=_bool(e.get("H50_INGRESS_ONLY")),
++            log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO",
+             ip=e.get("H50_IP", ""), token=token, device_name=e.get("H50_NAME", ""),
+         )
+ 
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index 46e0a24..7809de7 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -746,6 +746,7 @@
+         confirm: async () => { await api("POST", "/api/auth/password", { current: cur.value, new: nw.value }); toast("Senha alterada"); },
+       });
+     };
++    $("#sec-out").hidden = !!auth.ingress;           // dentro do Home Assistant a sessão é a do HA
+     $("#sec-out").onclick = async () => { await api("POST", "/api/auth/logout", {}).catch(() => {}); location.href = "login.html"; };
+     $("#sec-all").onclick = () => confirmAction("Sair de todos os aparelhos? Este também continua conectado.",
+       () => run("Sair de todos", () => api("POST", "/api/auth/revoke", {})));
+diff --git a/h50console/web.py b/h50console/web.py
+index 14efa32..72f8c25 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -21,7 +21,7 @@ from pathlib import Path
+ from urllib.parse import parse_qs, quote, urlparse
+ 
+ from . import catalog, dash, decoders
+-from .auth import AuthError
++from .auth import AuthError, is_loopback
+ from .gateway import CommandBlocked, Gateway
+ from .miio import MiioError
+ from .store import Store
+@@ -619,10 +619,15 @@ PUBLIC_FILES = {"/login.html", "/login.js", "/manifest.webmanifest", "/sw.js", "
+ CSP = ("default-src 'self'; img-src 'self' data: https://*.xiaomi.com; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
++# Ingress do Home Assistant: o Supervisor repassa os pedidos (já autenticados pelo HA) sempre deste IP, e o painel abre
++# num iframe da mesma origem do HA. Só as respostas a ele mudam o enquadramento.
++INGRESS_GATEWAY = "172.30.32.2"
++CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+ 
+ 
+ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool = False, local_only: bool = False,
+-                 extra_hosts=(), metrics_token: str = ""):
++                 extra_hosts=(), metrics_token: str = "", ingress: bool = False, ingress_only: bool = False,
++                 ingress_gateway: str = INGRESS_GATEWAY):
+     streams = {"n": 0}
+     streams_lock = threading.Lock()
+     class Handler(BaseHTTPRequestHandler):
+@@ -639,6 +644,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+                     return fwd
+             return self.client_address[0]
+ 
++        def _from_gateway(self) -> bool:
++            """Pedido do gateway do Ingress (HA já autenticou o usuário). Usa o IP REAL do socket, nunca X-Forwarded-For."""
++            return ingress and self.client_address[0] == ingress_gateway
++
+         def _secure_cookie(self) -> bool:
+             return cookie_secure or (trust_proxy and self.headers.get("X-Forwarded-Proto") == "https")
+ 
+@@ -665,8 +674,9 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+             self.send_header("Cache-Control", "no-store")
+             self.send_header("X-Content-Type-Options", "nosniff")
+             self.send_header("Referrer-Policy", "no-referrer")
+-            self.send_header("X-Frame-Options", "DENY")
+-            self.send_header("Content-Security-Policy", CSP)
++            gw = self._from_gateway()                # o painel do HA abre num iframe da mesma origem
++            self.send_header("X-Frame-Options", "SAMEORIGIN" if gw else "DENY")
++            self.send_header("Content-Security-Policy", CSP_INGRESS if gw else CSP)
+             self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+             self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+             self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+@@ -694,7 +704,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+         def _host_ok(self) -> bool:
+             """Servidor só em localhost e sem proxy: recusa Host de outro nome (DNS rebinding: um site que
+             aponta o próprio domínio para 127.0.0.1 e tenta falar com o painel pelo navegador da vítima)."""
+-            if not local_only:
++            if not local_only or self._from_gateway():
+                 return True
+             host = (self.headers.get("Host") or "").strip().lower()
+             name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+@@ -716,7 +726,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+ 
+         # -- autenticação ----------------------------------------------------------------------------
+         def _role(self) -> str | None:
+-            if auth is None or not auth.enabled:
++            if auth is None or not auth.enabled or self._from_gateway():
+                 return "admin"
+             return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
+ 
+@@ -729,9 +739,12 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+             if self.headers.get("X-H50") != "1":
+                 return False
+             origin = self.headers.get("Origin")
+-            if origin and urlparse(origin).netloc != self.headers.get("Host"):
+-                return False
+-            return True
++            if not origin:
++                return True
++            allowed = {self.headers.get("Host")}
++            if self._from_gateway():                 # pelo Ingress o Host pode ser o do app; o do HA vem em X-Forwarded-Host
++                allowed.add(self.headers.get("X-Forwarded-Host"))
++            return urlparse(origin).netloc in allowed - {None}
+ 
+         def _auth_api(self, method: str, path: str):
+             body, err = self._read_json()
+@@ -741,7 +754,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+             ip, secure = self._ip(), self._secure_cookie()
+             try:
+                 if path == "/api/auth/status" and method == "GET":
+-                    return self._send(200, auth.status(self._authed(), self._role()))
++                    st = auth.status(self._authed(), self._role())
++                    if self._from_gateway():             # nunca mostra login/primeiro acesso dentro do HA
++                        st.update(setup_required=False, ingress=True)
++                    return self._send(200, st)
+                 if path == "/api/auth/activity" and method == "GET":
+                     if self._role() != "admin":
+                         return self._send(401 if not self._authed() else 403, {"error": "só o administrador", "login": not self._authed()})
+@@ -775,6 +791,8 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+ 
+         # -- roteamento ---------------------------------------------------------------------------------
+         def _handle(self, method: str):
++            if ingress_only and not self._from_gateway() and not is_loopback(self.client_address[0]):
++                return self._send(403, {"error": "acesso direto desligado: abra o painel pelo Home Assistant"})
+             if not self._host_ok():
+                 return self._send(421, {"error": "nome de host não permitido (use localhost ou defina H50_ALLOWED_HOSTS)"})
+             url = urlparse(self.path)
+@@ -908,10 +926,11 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+ 
+ 
+ def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,
+-                cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "") -> ThreadingHTTPServer:
+-    from .auth import is_loopback
++                cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "", ingress: bool = False,
++                ingress_only: bool = False, ingress_gateway: str = INGRESS_GATEWAY) -> ThreadingHTTPServer:
+     local_only = is_loopback(host) and not trust_proxy
+     srv = ThreadingHTTPServer((host, port), make_handler(hub, auth, trust_proxy, cookie_secure, local_only,
+-                                                         {h.lower() for h in extra_hosts}, metrics_token))
++                                                         {h.lower() for h in extra_hosts}, metrics_token,
++                                                         ingress, ingress_only and ingress, ingress_gateway))
+     srv.daemon_threads = True
+     return srv
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 6e164a1..02e72e0 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -1,5 +1,6 @@
+ import http.client
+ import json
++import sys
+ import tempfile
+ import threading
+ import unittest
+@@ -189,19 +190,19 @@ class AuthUnit(unittest.TestCase):
+ class Server:
+     """Servidor real com autenticação ligada, frota vazia, falando por http.client (sem seguir redirecionamentos)."""
+ 
+-    def __init__(self, test: unittest.TestCase, trust_proxy: bool = False):
++    def __init__(self, test: unittest.TestCase, trust_proxy: bool = False, **server_kw):
+         self.tmp = tempfile.TemporaryDirectory()
+         test.addCleanup(self.tmp.cleanup)
+         self.auth = Auth(self.tmp.name, iters=FAST)
+         fleet = Fleet(self.tmp.name, None, start_threads=False)
+         test.addCleanup(fleet.stop_all)
+-        self.srv = make_server(Hub(fleet, None), "127.0.0.1", 0, auth=self.auth, trust_proxy=trust_proxy)
++        self.srv = make_server(Hub(fleet, None), "127.0.0.1", 0, auth=self.auth, trust_proxy=trust_proxy, **server_kw)
+         self.port = self.srv.server_address[1]
+         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+         test.addCleanup(self.srv.server_close)
+         test.addCleanup(self.srv.shutdown)
+ 
+-    def req(self, method, path, body=None, cookie=None, headers=None):
++    def req(self, method, path, body=None, cookie=None, headers=None, source=None):
+         h = {"Host": f"127.0.0.1:{self.port}", **(headers or {})}
+         if cookie:
+             h["Cookie"] = cookie
+@@ -209,7 +210,7 @@ class Server:
+         if body is not None:
+             data = json.dumps(body)
+             h["Content-Type"] = "application/json"
+-        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
++        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5, source_address=(source, 0) if source else None)
+         c.request(method, path, data, h)
+         r = c.getresponse()
+         raw = r.read()
+@@ -370,3 +371,74 @@ class AuthHttp(unittest.TestCase):
+ 
+ if __name__ == "__main__":
+     unittest.main()
++
++
++GW, OTHER = "127.0.0.3", "127.0.0.2"     # no Linux todo o 127/8 é loopback: dá para escolher o IP de origem do socket
++
++
++@unittest.skipUnless(sys.platform.startswith("linux"), "precisa de 127.0.0.2/127.0.0.3 como origem (Linux)")
++class IngressHttp(unittest.TestCase):
++    """Modo Ingress (app do Home Assistant). O gateway real é 172.30.32.2; aqui ele é simulado por 127.0.0.3."""
++
++    def server(self, **kw):
++        return Server(self, ingress=True, ingress_gateway=GW, **kw)
++
++    def test_gateway_is_admin_without_cookie_and_can_be_framed(self):
++        s = self.server()
++        st, d, r = s.req("GET", "/api/robots", source=GW)
++        self.assertEqual(st, 200)
++        self.assertEqual(r.getheader("X-Frame-Options"), "SAMEORIGIN")
++        self.assertIn("frame-ancestors 'self'", r.getheader("Content-Security-Policy"))
++        self.assertEqual(s.req("GET", "/", source=GW)[0], 200)
++        _, st, _ = s.req("GET", "/api/auth/status", source=GW)
++        self.assertEqual((st["authenticated"], st["role"], st["setup_required"], st["ingress"]), (True, "admin", False, True))
++        st, _, _ = s.req("POST", "/api/auth/viewer", {"password": "somente-leitura-1"}, headers={"X-H50": "1"}, source=GW)
++        self.assertEqual(st, 200)
++
++    def test_other_origins_still_need_the_password_and_cannot_frame(self):
++        s = self.server()
++        for src in (OTHER, "127.0.0.1"):
++            st, body, r = s.req("GET", "/api/robots", source=src, headers={"X-Forwarded-For": "172.30.32.2"})
++            self.assertEqual((st, body["login"]), (401, True), src)
++            self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
++            self.assertIn("frame-ancestors 'none'", r.getheader("Content-Security-Policy"))
++            _, st, _ = s.req("GET", "/api/auth/status", source=src)
++            self.assertNotIn("ingress", st)
++            self.assertTrue(st["setup_required"])
++        self.assertEqual(s.req("GET", "/", source=OTHER)[0], 302)
++
++    def test_ingress_needs_the_real_socket_ip(self):
++        s = Server(self, ingress=True, trust_proxy=True)       # gateway padrão (172.30.32.2); X-Forwarded-For não vale
++        st, _, _ = s.req("GET", "/api/robots", headers={"X-Forwarded-For": "172.30.32.2"})
++        self.assertEqual(st, 401)
++
++    def test_csrf_from_gateway_accepts_the_ha_origin_only(self):
++        s = self.server()
++        ha = {"X-H50": "1", "Host": "172.30.32.1:8050", "X-Forwarded-Host": "ha.local:8123"}
++        st, _, _ = s.req("POST", "/api/robots", {}, headers={**ha, "Origin": "http://ha.local:8123"}, source=GW)
++        self.assertNotEqual(st, 403)
++        st, _, _ = s.req("POST", "/api/robots", {}, headers={**ha, "Origin": "http://mal.example"}, source=GW)
++        self.assertEqual(st, 403)
++        st, _, _ = s.req("POST", "/api/robots", {}, headers={**ha, "X-H50": ""}, source=GW)
++        self.assertEqual(st, 403)
++        # fora do gateway, X-Forwarded-Host não amplia nada
++        cookie = s.login_cookie()
++        st, _, _ = s.req("POST", "/api/robots", {}, cookie=cookie, source=OTHER,
++                         headers={**ha, "Host": f"127.0.0.1:{s.port}", "Origin": "http://ha.local:8123"})
++        self.assertEqual(st, 403)
++
++    def test_ingress_only_refuses_direct_access_but_not_loopback(self):
++        s = self.server(ingress_only=True)
++        st, body, _ = s.req("GET", "/login.html", source=OTHER)
++        self.assertEqual(st, 403)
++        self.assertIn("Home Assistant", body["error"])
++        self.assertEqual(s.req("GET", "/api/robots", source=GW)[0], 200)
++        self.assertEqual(s.req("GET", "/api/auth/status")[0], 200)              # loopback (healthcheck)
++        self.assertEqual(s.req("GET", "/api/robots")[0], 401)                   # ...mas continua exigindo senha
++
++    def test_without_ingress_nothing_changes(self):
++        s = Server(self, ingress_gateway=GW)                       # mesmo IP, modo desligado: é um cliente qualquer
++        st, _, r = s.req("GET", "/api/robots", source=GW)
++        self.assertEqual(st, 401)
++        self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
++        self.assertIn("frame-ancestors 'none'", r.getheader("Content-Security-Policy"))
+-- 
+2.53.0
+
