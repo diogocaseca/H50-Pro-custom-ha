@@ -8,5 +8,10 @@ configuration:
   direct_access:
     name: Direct access on port 8050
     description: When off, the panel only opens from the Home Assistant sidebar.
+  cloud_region:
+    name: Xiaomi cloud server
+    description: >-
+      Server where the robot is registered in the Xiaomi account (used only for the map and setup). auto = detect.
+      us = USA, de = Europe, sg = Singapore, cn = China, ru = Russia, i2 = India.
   log_level:
     name: Log level

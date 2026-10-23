@@ -23,7 +23,7 @@ repository.yaml            # descreve o repositório para o Supervisor
 h50console/                # o app (slug h50console); é o contexto de build do Supervisor
   config.yaml build.yaml   # build.yaml → args.H50_COMMIT: commit do original usado no build
   Dockerfile  run.py
-  patches/0001-…0003-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
+  patches/0001-…0004-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
 tools/update-upstream.sh   # move os patches para um commit novo do original
 ```
 
@@ -42,6 +42,7 @@ Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta ex
 | 0001 | Front com caminhos relativos, para rodar atrás de um prefixo (`/api/hassio_ingress/<token>/`) |
 | 0002 | Redirecionamento relativo para a página de login |
 | 0003 | Modo Ingress (`H50_INGRESS`, `H50_INGRESS_ONLY`) e `H50_LOG_LEVEL`, com testes |
+| 0004 | Servidor da nuvem Xiaomi fixo (`H50_CLOUD_COUNTRY`; opção `cloud_region` do app), com testes |
 
 ## Testar localmente
 

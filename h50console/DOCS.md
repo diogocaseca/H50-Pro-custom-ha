@@ -43,6 +43,7 @@ histórico de limpezas.
 | `password` | vazio | Senha para o **acesso direto** (`http://<ip-do-ha>:8050`). Não é usada pelo painel na barra lateral |
 | `viewer_password` | vazio | Senha do perfil **somente leitura** no acesso direto (consulta, sem comandos) |
 | `direct_access` | desligado | Liga o acesso direto pela porta 8050. Desligado, o app recusa qualquer conexão que não venha do HA |
+| `cloud_region` | `auto` | Servidor da nuvem Xiaomi em que o robô está: `us` (EUA, onde costumam ficar as contas do Brasil), `de` (Europa), `sg` (Singapura), `cn` (China), `ru` (Rússia), `i2` (Índia). Veja abaixo |
 | `log_level` | `info` | `debug`, `info`, `warning` ou `error` |
 
 ### Acesso direto (opcional)
@@ -53,6 +54,14 @@ recusa tudo o que não vem do Ingress enquanto `direct_access` estiver desligado
 Se ligar o acesso direto (por exemplo, para instalar o painel como app no celular ou usar o servidor MCP), defina `password`.
 Sem ela, o painel pede uma senha nova com um **código de primeiro acesso** que aparece no **Registro** do app.
 **Não** abra a porta 8050 do roteador para a internet; para acesso de fora use o próprio Home Assistant (Nabu Casa, VPN).
+
+### Servidor da nuvem (`cloud_region`)
+
+Em `auto`, o painel usa o primeiro servidor da Xiaomi em que a conta tem **algum** aparelho. Se a conta tem aparelhos em
+servidores diferentes (por exemplo, lâmpadas no `us` e o robô no `de`), ele pode ficar no servidor errado: o mapa não
+baixa e o robô não aparece em **Adicionar pela conta**. Nesse caso escolha o servidor do robô (é a região escolhida no
+app Xiaomi Home quando o robô foi adicionado), salve e reinicie o app. O servidor em uso aparece em **Robôs**
+("servidor …"). A opção só afeta a nuvem (mapa e cadastro); os comandos continuam pela rede local.
 
 ## Segurança
 
@@ -73,15 +82,16 @@ A aba **Manutenção** do painel também gera backups criptografados próprios.
 | O app não inicia: porta 8050 em uso | Outro serviço do host usa a 8050 (a rede do host compartilha as portas). Libere a porta |
 | O robô não aparece na busca | Robô e HA em redes/VLANs diferentes, ou broadcast bloqueado. Informe o IP no cadastro e reserve o IP no roteador |
 | "Sem resposta do robô" | O IP mudou? **Robôs → Achar pelo DID**. Confira se o transporte é "Só rede local" e se o robô está ligado |
-| O mapa não aparece | A conta Xiaomi precisa estar conectada (**Robôs**). O mapa vem da nuvem; os comandos não |
+| O mapa não aparece | A conta Xiaomi precisa estar conectada (**Robôs**). O mapa vem da nuvem; os comandos não. Se o robô está em outro servidor da Xiaomi, ajuste `cloud_region` |
 | "acesso direto desligado" | Você abriu `http://<ip>:8050`. Use o painel pela barra lateral, ou ligue `direct_access` |
 
 ## De onde vem o código
 
 O painel é o [H50 Console](https://github.com/nathanabreu/H50-Pro-custom), de
 [Nathan Dame Abreu](https://github.com/nathanabreu). Este app não guarda uma cópia dele: ao instalar ou atualizar, o
-Home Assistant baixa o original num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica três patches pequenos
-(pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login e o modo Ingress.
+Home Assistant baixa o original num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica patches pequenos
+(pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login, o modo Ingress
+e a escolha do servidor da nuvem.
 Se um patch não aplicar, a instalação falha em vez de gerar um painel incompleto. Detalhes no
 [repositório do app](https://github.com/diogocaseca/H50-Pro-custom-ha).
 

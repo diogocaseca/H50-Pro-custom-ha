@@ -22,6 +22,7 @@ env.update({
     "H50_PORT": "8050",
     "H50_INGRESS": "true",
     "H50_LOG_LEVEL": str(opts.get("log_level") or "info").upper(),
+    "H50_CLOUD_COUNTRY": str(opts.get("cloud_region") or "auto"),   # auto = o painel descobre o servidor
 })
 if not opts.get("direct_access"):
     env["H50_INGRESS_ONLY"] = "true"   # rede do host: sem isto a porta 8050 ficaria aberta na LAN

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Opção `cloud_region` (servidor da nuvem Xiaomi: `auto`, `us`, `de`, `sg`, `cn`, `ru`, `i2`) para contas com aparelhos
+  em servidores diferentes: com o servidor do robô fixo, o mapa e o cadastro pela conta voltam a funcionar.
+- Patch `0004`: `H50_CLOUD_COUNTRY` no painel (vazio ou `auto` = comportamento original), com testes.
+
 ## 0.1.1
 
 - Watchdog do Supervisor: checagem TCP da porta 8050; com o interruptor **Watchdog** ligado, o HA reinicia o app se o

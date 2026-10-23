@@ -1,6 +1,6 @@
 # App do Home Assistant (antigo "add-on"). Documentação: DOCS.md
 name: H50 Console
-version: "0.1.1"
+version: "0.1.2"
 slug: h50console
 description: Painel local para aspiradores Xiaomi H50 Pro (controle pela rede local; nuvem só para o mapa)
 url: https://github.com/diogocaseca/H50-Pro-custom-ha
@@ -28,9 +28,11 @@ watchdog: tcp://[HOST]:[PORT:8050]
 backup: hot
 options:
   direct_access: false
+  cloud_region: auto
   log_level: info
 schema:
   password: password?
   viewer_password: password?
   direct_access: bool
+  cloud_region: list(auto|us|de|sg|cn|ru|i2)
   log_level: list(debug|info|warning|error)

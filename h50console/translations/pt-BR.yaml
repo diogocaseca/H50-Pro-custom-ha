@@ -8,5 +8,10 @@ configuration:
   direct_access:
     name: Acesso direto pela porta 8050
     description: Desligado, o painel só abre pela barra lateral do Home Assistant.
+  cloud_region:
+    name: Servidor da nuvem Xiaomi
+    description: >-
+      Servidor em que o robô está na conta Xiaomi (só para o mapa e o cadastro). auto = descobre sozinho.
+      us = EUA (contas do Brasil), de = Europa, sg = Singapura, cn = China, ru = Rússia, i2 = Índia.
   log_level:
     name: Nível de log
