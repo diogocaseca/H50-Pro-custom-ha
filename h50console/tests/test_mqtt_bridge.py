@@ -54,6 +54,23 @@ class Mapping(unittest.TestCase):
         self.assertEqual((idle["progress"], idle["charging"], idle["fault"], idle["battery"]), (None, True, "210013", None))
         self.assertNotIn("fan_speed", mb.vacuum_payload({"status": 2, "values": {}}, []))
 
+    def test_cleaning_session(self):
+        self.assertTrue((mb.SESSION_ON | mb.SESSION_KEEP) <= set(catalog.STATUS))
+        self.assertFalse(mb.SESSION_ON & mb.SESSION_KEEP)
+        cs = mb.cleaning_session
+        self.assertTrue(cs(4, False))                            # começou
+        self.assertTrue(cs(5, True))                             # pausado continua
+        self.assertTrue(cs(7, True))                             # lavando o mop no meio da limpeza
+        self.assertTrue(cs(20, True))                            # voltando no meio da rota
+        self.assertFalse(cs(6, True))                            # voltando para a base: fim
+        self.assertFalse(cs(7, False))                           # lavando o mop depois do fim
+        self.assertFalse(cs(12, False))                          # base preparando o mop antes de sair
+        self.assertFalse(cs(9, True))
+        self.assertTrue(cs(None, True))                          # robô fora do ar: mantém
+        self.assertTrue(cs(7, None, 35))                         # ponte reiniciou no meio: usa o progresso
+        self.assertFalse(cs(7, None, -1))
+        self.assertFalse(cs(None, None))
+
     def test_discovery(self):
         object_id, p = mb.discovery(ROBOT, "0.2.0")
         self.assertEqual(object_id, "h50console_123456")
@@ -184,6 +201,19 @@ class BridgeTests(unittest.TestCase):
         self.bridge.dirty.add("sala")
         self.bridge.tick()
         self.assertEqual([t for t, _, _ in self.out[n:]], ["h50console/sala/attrs"])
+
+    def test_cleaning_flag_follows_the_session(self):
+        self.bridge.on_connect()
+        seen = []
+        for status, progress in ((9, -1), (12, -1), (4, 10), (7, 30), (20, 40), (16, 60), (6, 100), (7, -1), (9, -1)):
+            self.api.state.update(status=status)
+            self.api.state["values"].update({"2/2": status, "2/89": progress})
+            self.bridge.dirty.add("sala")
+            self.bridge.tick()
+            seen.append(json.loads(self.published()["h50console/sala/attrs"])["cleaning"])
+        self.assertEqual(seen, [False, False, True, True, True, True, False, False, False])
+        disc = json.loads(self.published()["homeassistant/device/h50console_123456/config"])
+        self.assertEqual((disc["cmps"]["cleaning"]["p"], disc["cmps"]["cleaning"]["dev_cla"]), ("binary_sensor", "running"))
 
     def test_offline_robot_and_removed_robot(self):
         self.bridge.on_connect()

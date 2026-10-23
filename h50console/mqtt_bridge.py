@@ -39,6 +39,9 @@ HA_STATE = {
     **dict.fromkeys((1, 8, 11, 13), "idle"),
 }
 PAUSED = 5
+# 2/2 -> "Limpeza em andamento": liga no início e só desliga no fim, mesmo com idas à base no meio da limpeza
+SESSION_ON = {4, 16, 17, 5, 3, 19, 20}      # limpando, pausado, carregando/voltando para retomar, voltando no meio
+SESSION_KEEP = {7, 12, 13}                  # lavando o mop, base trabalhando, trocando de tarefa: antes, no meio ou depois
 
 # Enums usados nas entidades (mesmos textos do painel: catalog.ENUM_PT; um teste confere que não divergiram)
 FAN_SPEED = {1: "Silencioso", 2: "Padrão", 3: "Intenso", 4: "Turbo"}                                       # 2/9
@@ -77,6 +80,18 @@ def ha_state(status) -> str:
     return HA_STATE.get(status, "idle" if status is not None else "error")
 
 
+def cleaning_session(status, previous: bool | None, progress=None) -> bool:
+    """Limpeza em andamento? Nos status ambíguos vale o valor anterior; sem anterior (ponte reiniciou), o progresso
+    da limpeza (2/89 = -1 quando não há limpeza). Status desconhecido (robô fora do ar) também mantém o anterior."""
+    if status in SESSION_ON:
+        return True
+    if status in SESSION_KEEP or status is None:
+        if previous is not None:
+            return previous
+        return status is not None and isinstance(_num(progress), (int, float)) and progress >= 0
+    return False
+
+
 def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
@@ -89,7 +104,7 @@ def vacuum_payload(state: dict, rooms: list[dict]) -> dict:
     return out
 
 
-def attrs_payload(state: dict) -> dict:
+def attrs_payload(state: dict, cleaning: bool = False) -> dict:
     """Valores das demais entidades (sensores, seletores): um JSON só, lido por value_template."""
     v = state.get("values") or {}
     progress = _num(v.get("2/89"))
@@ -99,6 +114,7 @@ def attrs_payload(state: dict) -> dict:
         "status": state.get("status_label"),
         "battery": _num(state.get("battery")),
         "charging": v.get("3/2") == 1,
+        "cleaning": cleaning,
         "progress": progress if progress is None or progress >= 0 else None,      # -1 = sem limpeza
         "area": None if area is None else round(area / 100, 2),                   # 2/6 vem em 0,01 m²
         "duration": _num(v.get("2/7")),
@@ -154,6 +170,9 @@ def discovery(robot: dict, version: str = "") -> tuple[str, dict]:
         "charging": {"p": "binary_sensor", "name": "Carregando", "uniq_id": f"{key}_charging", **common,
                      "stat_t": t["attrs"], "val_tpl": "{{ 'ON' if value_json.charging else 'OFF' }}",
                      "dev_cla": "battery_charging"},
+        "cleaning": {"p": "binary_sensor", "name": "Limpeza em andamento", "uniq_id": f"{key}_cleaning", **common,
+                     "stat_t": t["attrs"], "val_tpl": "{{ 'ON' if value_json.cleaning else 'OFF' }}",
+                     "dev_cla": "running", "ic": "mdi:robot-vacuum-variant"},
         "dirty_tank_full": {"p": "binary_sensor", "name": "Tanque de água suja cheio", "uniq_id": f"{key}_dirty_tank",
                             **common, "stat_t": t["attrs"], "dev_cla": "problem",
                             "val_tpl": "{{ 'ON' if value_json.dirty_tank_full else 'OFF' }}"},
@@ -336,6 +355,7 @@ class Bridge:
         self.robots: dict[str, dict] = {}          # id -> resumo da API (/api/robots)
         self.rooms: dict[str, list[dict]] = {}
         self.status: dict[str, object] = {}        # último 2/2 de cada robô (para "start" virar "resume")
+        self.cleaning: dict[str, bool] = {}        # "Limpeza em andamento" de cada robô
         self.dirty: set[str] = set()
         self.sent: dict[str, str] = {}             # tópico -> último payload (só publica o que mudou)
         self.lock = threading.RLock()
@@ -424,9 +444,14 @@ class Bridge:
             return
         online = bool((state.get("health") or {}).get("online")) and state.get("status") is not None
         self.status[rid] = state.get("status")
+        cleaning = cleaning_session(state.get("status") if online else None, self.cleaning.get(rid),
+                                    (state.get("values") or {}).get("2/89"))
+        if cleaning != self.cleaning.get(rid, False):
+            log.info("robô %s: limpeza %s", rid, "começou" if cleaning else "terminou")
+        self.cleaning[rid] = cleaning
         t = topics(rid)
         self._pub(t["vacuum"], vacuum_payload(state, self.rooms.get(rid, [])))
-        self._pub(t["attrs"], attrs_payload(state))
+        self._pub(t["attrs"], attrs_payload(state, cleaning))
         self._pub(t["availability"], "online" if online else "offline")
 
     def handle(self, topic: str, payload: str) -> None:

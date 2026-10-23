@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+- MQTT: sensor binário **Limpeza em andamento**, ligado do início ao fim da limpeza. Pausas e idas à base no meio da
+  limpeza (lavar o mop, recarregar para continuar) não o desligam; desliga quando o robô volta à base no fim. Bom para
+  automações de "começou" e "terminou". O log do app registra "limpeza começou/terminou".
+
 ## 0.3.5
 
 - Correção: ao executar uma rotina pelo painel (▶ no Início) ou pelo MQTT (`custom`), o robô usava o **modo de

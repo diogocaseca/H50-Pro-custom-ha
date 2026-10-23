@@ -134,6 +134,7 @@ comandos da aba **Diagnóstico**.
 | Aspirador (`vacuum`) | Estado (limpando, na base, pausado, voltando, parado, erro), iniciar/continuar, pausar, parar, voltar à base, localizar, limpeza pontual, potência de sucção e limpeza por cômodo |
 | Bateria, Status, Progresso da limpeza, Área limpa, Tempo de limpeza, Falha | Sensores |
 | Carregando, Tanque de água suja cheio, Tanque de água limpa vazio | Sensores binários |
+| Limpeza em andamento | Sensor binário: **ligado** do início ao fim da limpeza, inclusive pausas e idas à base no meio dela (lavar o mop, recarregar para continuar); **desliga** quando o robô volta à base no fim, ou ao parar ou mandar voltar |
 | Conectado pela rede local | Diagnóstico: se o painel está conseguindo falar com o robô |
 | Escova principal, Escova lateral, Filtro, Mop, Saco de pó | Diagnóstico: vida útil em % |
 | Potência de sucção, Modo de limpeza, Nível de água do mop, Caminho, Tempos de limpeza | Seletores (configuração) |
@@ -184,6 +185,20 @@ actions:
   - action: notify.notify
     data:
       message: Esvazie o tanque de água suja do robô.
+```
+
+Avisar quando a limpeza terminar:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.robo_da_sala_limpeza_em_andamento
+    from: "on"
+    to: "off"
+actions:
+  - action: notify.notify
+    data:
+      message: O robô terminou a limpeza.
 ```
 
 Os nomes das entidades dependem do nome do robô no painel; confira em **Configurações → Entidades**.
