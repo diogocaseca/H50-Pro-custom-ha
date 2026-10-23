@@ -514,7 +514,7 @@ class Bridge:
 # -- broker (Supervisor) e cliente MQTT ----------------------------------------------------------------------------
 def supervisor_mqtt() -> dict | None:
     """Dados do broker MQTT do HA (app Mosquitto), pela API do Supervisor (config.yaml: services mqtt:want)."""
-    token = os.environ.get("SUPERVISOR_TOKEN")
+    token = os.environ.get("SUPERVISOR_TOKEN", "").strip()
     if not token:
         return None
     req = urllib.request.Request("http://supervisor/services/mqtt", headers={"Authorization": f"Bearer {token}"})

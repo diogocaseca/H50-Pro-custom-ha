@@ -15,8 +15,19 @@ import sys
 import threading
 from pathlib import Path
 
+sys.dont_write_bytecode = True        # nada de __pycache__ em /data (entra no backup do HA)
 OPTIONS = os.environ.get("H50_OPTIONS", "/data/options.json")
 PORT = 8050
+
+# O s6-overlay da imagem base inicia o CMD com o ambiente reduzido; as variáveis do container (SUPERVISOR_TOKEN,
+# H50_APP_VERSION...) ficam em arquivos, como o with-contenv faz para os scripts em shell.
+_ENV_DIR = Path("/run/s6/container_environment")
+if _ENV_DIR.is_dir():
+    for _f in _ENV_DIR.iterdir():
+        try:
+            os.environ.setdefault(_f.name, _f.read_text(encoding="utf-8").split("\n", 1)[0])   # como o s6-envdir
+        except (OSError, UnicodeDecodeError):
+            pass
 
 try:
     with open(OPTIONS, encoding="utf-8") as f:
