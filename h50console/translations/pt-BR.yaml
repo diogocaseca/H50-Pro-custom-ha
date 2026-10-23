@@ -1,0 +1,12 @@
+configuration:
+  password:
+    name: Senha do acesso direto
+    description: Senha para abrir o painel em http://<ip-do-ha>:8050 (só vale com o acesso direto ligado).
+  viewer_password:
+    name: Senha somente leitura
+    description: Senha do perfil que só consulta, no acesso direto.
+  direct_access:
+    name: Acesso direto pela porta 8050
+    description: Desligado, o painel só abre pela barra lateral do Home Assistant.
+  log_level:
+    name: Nível de log

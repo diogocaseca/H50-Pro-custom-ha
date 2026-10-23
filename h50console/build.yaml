@@ -1,0 +1,9 @@
+# Imagem base Python do Home Assistant (Alpine) por arquitetura.
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.22
+  amd64: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
+  armv7: ghcr.io/home-assistant/armv7-base-python:3.13-alpine3.22
+args:
+  # Código do painel: tag (ou commit) do GitHub. Ao lançar uma versão, crie a tag app-v<version> e
+  # atualize este valor junto com `version` no config.yaml.
+  H50_REF: app-v0.1.0

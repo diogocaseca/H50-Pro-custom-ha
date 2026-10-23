@@ -1,0 +1,12 @@
+configuration:
+  password:
+    name: Direct access password
+    description: Password for http://<ha-ip>:8050 (only used when direct access is on).
+  viewer_password:
+    name: Read-only password
+    description: Password for the read-only profile on direct access.
+  direct_access:
+    name: Direct access on port 8050
+    description: When off, the panel only opens from the Home Assistant sidebar.
+  log_level:
+    name: Log level
