@@ -41,7 +41,7 @@ class Mapping(unittest.TestCase):
         self.assertEqual((a["battery"], a["charging"], a["progress"], a["area"], a["duration"], a["fault"]),
                          (87, False, 40, 12.34, 600, "Nenhuma"))
         self.assertEqual((a["dirty_tank_full"], a["clean_tank_empty"]), (True, False))
-        self.assertEqual((a["clean_mode"], a["water_level"]), ("Aspirando e esfregando", "Nível 2"))
+        self.assertEqual((a["clean_mode"], a["water_level"], a["suction"]), ("Aspirando e esfregando", "Nível 2", "Intenso"))
         self.assertEqual(a["consumables"]["main_brush"], 90)
         self.assertIsNone(a["consumables"]["dust_bag"])
         idle = mb.attrs_payload({"status": 2, "values": {"2/89": -1, "3/2": 1, "2/3": 210013}})
@@ -64,6 +64,10 @@ class Mapping(unittest.TestCase):
         self.assertEqual(v["avty_mode"], "all")
         self.assertEqual(cmps["online"]["avty_t"], mb.BRIDGE_STATUS)       # conectividade não some com o robô
         self.assertEqual(cmps["clean_mode"]["ops"][0], "Aspirando")
+        s = cmps["suction"]
+        self.assertEqual((s["p"], s["ent_cat"], s["cmd_t"], s["ops"]),
+                         ("select", "config", "h50console/sala/cmd/select/suction", ["Silencioso", "Padrão", "Intenso", "Turbo"]))
+        self.assertEqual(s["val_tpl"], "{{ value_json.suction }}")
         self.assertEqual(json.loads(json.dumps(p)), p)
         self.assertEqual(mb.discovery({"id": "x"})[0], "h50console_x")    # sem DID: id do painel
 
@@ -87,6 +91,7 @@ class Commands(unittest.TestCase):
         self.assertEqual(self.calls("fan_speed", "turbo")[0][2], {"value": 4})
         self.assertEqual(self.calls("select/water_level", "Nível 3"), [("PUT", "/api/r/sala/settings/2-10", {"value": 3})])
         self.assertEqual(self.calls("select/clean_mode", "Esfregando")[0][2], {"value": 2})
+        self.assertEqual(self.calls("select/suction", "Turbo"), [("PUT", "/api/r/sala/settings/2-9", {"value": 4})])
         self.assertEqual(self.calls("button/dust", "PRESS"), [("POST", "/api/r/sala/actions/dust", None)])
         self.assertEqual(self.calls("segments", '["3", "5"]'), [("POST", "/api/r/sala/clean/rooms", {"ids": [3, 5]})])
         for sub, payload in (("fan_speed", "Máximo"), ("select/x", "a"), ("button/start", "PRESS"),

@@ -125,7 +125,7 @@ comandos da aba **Diagnóstico**.
 | Carregando, Tanque de água suja cheio, Tanque de água limpa vazio | Sensores binários |
 | Conectado pela rede local | Diagnóstico: se o painel está conseguindo falar com o robô |
 | Escova principal, Escova lateral, Filtro, Mop, Detergente, Saco de pó | Diagnóstico: vida útil em % |
-| Modo de limpeza, Nível de água do mop | Seletores (configuração) |
+| Potência de sucção, Modo de limpeza, Nível de água do mop | Seletores (configuração) |
 | Esvaziar o pó, Lavar o mop, Secar o mop, Parar a lavagem, Parar a secagem, Autolimpeza da base | Botões |
 
 Se o painel não conseguir falar com o robô, as entidades dele ficam **indisponíveis** (o painel leva até ~1 min para

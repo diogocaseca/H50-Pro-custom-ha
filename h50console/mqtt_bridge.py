@@ -44,7 +44,8 @@ PAUSED = 5
 FAN_SPEED = {1: "Silencioso", 2: "Padrão", 3: "Intenso", 4: "Turbo"}                                       # 2/9
 CLEAN_MODE = {1: "Aspirando", 3: "Aspirando e esfregando", 4: "Aspirar antes de esfregar", 2: "Esfregando"}  # 2/4
 WATER_LEVEL = {0: "Desligada", 1: "Nível 1", 2: "Nível 2", 3: "Nível 3"}                                    # 2/10
-SELECTS = {"clean_mode": ("2/4", "Modo de limpeza", CLEAN_MODE, "mdi:broom"),
+SELECTS = {"suction": ("2/9", "Potência de sucção", FAN_SPEED, "mdi:fan"),
+           "clean_mode": ("2/4", "Modo de limpeza", CLEAN_MODE, "mdi:broom"),
            "water_level": ("2/10", "Nível de água do mop", WATER_LEVEL, "mdi:water")}
 CONSUMABLES = {  # item -> (prop de %, nome)
     "main_brush": ("12/1", "Escova principal"), "side_brush": ("13/1", "Escova lateral"), "filter": ("14/1", "Filtro"),
@@ -97,6 +98,7 @@ def attrs_payload(state: dict) -> dict:
         "fault": None if fault is None else ("Nenhuma" if fault == 0 else str(fault)),
         "dirty_tank_full": bool(v.get("2/97")),
         "clean_tank_empty": bool(v.get("2/98")),
+        "suction": FAN_SPEED.get(v.get("2/9")),
         "clean_mode": CLEAN_MODE.get(v.get("2/4")),
         "water_level": WATER_LEVEL.get(v.get("2/10")),
         "consumables": {item: _num(v.get(p)) for item, (p, _) in CONSUMABLES.items()},

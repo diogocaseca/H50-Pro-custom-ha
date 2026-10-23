@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- MQTT: seletor **Potência de sucção** (Silencioso, Padrão, Intenso, Turbo) nas configurações do dispositivo, ao lado
+  de Modo de limpeza e Nível de água do mop. A potência continua também no próprio aspirador.
+
 ## 0.3.1
 
 - MQTT: opções `mqtt_user`, `mqtt_password`, `mqtt_port` (padrão 1883) e `mqtt_host` (vazio = Mosquitto do HA).
