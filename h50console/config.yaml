@@ -3,7 +3,7 @@ name: H50 Console
 version: "0.1.0"
 slug: h50console
 description: Painel local para aspiradores Xiaomi H50 Pro (controle pela rede local; nuvem só para o mapa)
-url: https://github.com/diogocaseca/H50-Pro-custom
+url: https://github.com/diogocaseca/H50-Pro-custom-ha
 arch:
   - aarch64
   - amd64

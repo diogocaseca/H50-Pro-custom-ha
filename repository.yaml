@@ -1,0 +1,4 @@
+# Repositório de apps do Home Assistant: Configurações → Apps → Loja de apps → ⋮ → Repositórios → adicione a URL abaixo.
+name: H50 Console
+url: https://github.com/diogocaseca/H50-Pro-custom-ha
+maintainer: Diogo Caseca
