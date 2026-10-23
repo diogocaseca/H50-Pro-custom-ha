@@ -8,7 +8,7 @@ token do robô automaticamente.
 ## Instalação
 
 1. No Home Assistant: **Configurações → Apps → Loja de apps**.
-2. Menu **⋮ → Repositórios**, adicione `https://github.com/diogocaseca/H50-Pro-custom` e feche.
+2. Menu **⋮ → Repositórios**, adicione `https://github.com/diogocaseca/H50-Pro-custom-ha` e feche.
 3. Procure **H50 Console** na loja, clique em **Instalar** e depois em **Iniciar**.
 4. Ative **Mostrar na barra lateral**. O painel abre em **Aspirador**.
 
@@ -75,6 +75,15 @@ A aba **Manutenção** do painel também gera backups criptografados próprios.
 | "Sem resposta do robô" | O IP mudou? **Robôs → Achar pelo DID**. Confira se o transporte é "Só rede local" e se o robô está ligado |
 | O mapa não aparece | A conta Xiaomi precisa estar conectada (**Robôs**). O mapa vem da nuvem; os comandos não |
 | "acesso direto desligado" | Você abriu `http://<ip>:8050`. Use o painel pela barra lateral, ou ligue `direct_access` |
+
+## De onde vem o código
+
+O painel é o [H50 Console](https://github.com/nathanabreu/H50-Pro-custom), de
+[Nathan Dame Abreu](https://github.com/nathanabreu). Este app não guarda uma cópia dele: ao instalar ou atualizar, o
+Home Assistant baixa o original num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica três patches pequenos
+(pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login e o modo Ingress.
+Se um patch não aplicar, a instalação falha em vez de gerar um painel incompleto. Detalhes no
+[repositório do app](https://github.com/diogocaseca/H50-Pro-custom-ha).
 
 ## Licença
 

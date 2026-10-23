@@ -1,0 +1,76 @@
+# H50 Console para o Home Assistant
+
+Repositório de app do Home Assistant (antigo "add-on") com o **H50 Console**, o painel local para aspiradores Xiaomi
+**H50 Pro** (`xiaomi.vacuum.ov42gl`) de [nathanabreu/H50-Pro-custom](https://github.com/nathanabreu/H50-Pro-custom).
+O painel aparece na barra lateral do HA (Ingress, com o login e o HTTPS do próprio HA) e controla o robô **100% pela
+rede local** (UDP 54321). A nuvem Xiaomi só é usada para baixar o mapa e trazer o token ao cadastrar o robô.
+
+Este repositório **não contém cópia do código do painel**: o build baixa o original num commit fixo e aplica pequenos
+patches para rodar atrás do Ingress.
+
+## Instalação no Home Assistant
+
+1. **Configurações → Apps → Loja de apps**.
+2. Menu **⋮ → Repositórios**, adicione `https://github.com/diogocaseca/H50-Pro-custom-ha` e feche.
+3. Procure **H50 Console**, clique em **Instalar** e depois em **Iniciar**. Ative **Mostrar na barra lateral**.
+
+Primeiro uso, opções e segurança: [h50console/DOCS.md](h50console/DOCS.md).
+
+## Como funciona
+
+```
+repository.yaml            # descreve o repositório para o Supervisor
+h50console/                # o app (slug h50console); é o contexto de build do Supervisor
+  config.yaml build.yaml   # build.yaml → args.H50_COMMIT: commit do original usado no build
+  Dockerfile  run.py
+  patches/0001-…0003-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
+tools/update-upstream.sh   # move os patches para um commit novo do original
+```
+
+O Supervisor do HA constrói a imagem usando **só** a pasta `h50console/`, por isso os patches ficam dentro dela.
+O [Dockerfile](h50console/Dockerfile):
+
+1. baixa `https://github.com/nathanabreu/H50-Pro-custom/archive/<H50_COMMIT>.tar.gz`;
+2. aplica `patches/*.patch` em ordem com `patch -p1 --forward --fuzz=0`; se algum trecho não aplicar, **o build falha**
+   (nunca sai uma imagem com o código pela metade);
+3. instala o pacote na imagem base Python do HA e sobe com `run.py`, que lê as opções do app.
+
+Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta exatamente como o original):
+
+| Patch | O quê |
+|---|---|
+| 0001 | Front com caminhos relativos, para rodar atrás de um prefixo (`/api/hassio_ingress/<token>/`) |
+| 0002 | Redirecionamento relativo para a página de login |
+| 0003 | Modo Ingress (`H50_INGRESS`, `H50_INGRESS_ONLY`) e `H50_LOG_LEVEL`, com testes |
+
+## Testar localmente
+
+Na raiz deste repositório:
+
+```bash
+H50_COMMIT=$(sed -n 's/^ *H50_COMMIT: *//p' h50console/build.yaml)
+docker build --build-arg H50_COMMIT=$H50_COMMIT --target test h50console       # testes do original + dos patches
+docker build --build-arg H50_COMMIT=$H50_COMMIT -t h50console-app h50console   # imagem final (amd64)
+```
+
+Para usar uma cópia local do original no lugar do download, veja o topo do Dockerfile (`--build-context upstream=`).
+
+## Atualizar quando o original mudar
+
+```bash
+tools/update-upstream.sh <commit-novo-do-original>
+```
+
+O script clona o original, aplica os patches com `git am --3way` sobre o commit novo e, se tudo aplicar, regera
+`h50console/patches/` e atualiza `H50_COMMIT` no `build.yaml`. Se houver conflito, ele para, deixa o clone numa pasta
+temporária e explica como resolver e concluir (`tools/update-upstream.sh --finish <pasta>`). Depois:
+
+1. rode o `docker build --target test` acima;
+2. suba `version` em `h50console/config.yaml` (é o que faz o HA oferecer a atualização) e registre no
+   `h50console/CHANGELOG.md`;
+3. faça o commit e o push.
+
+## Licença
+
+MIT. Código do painel © Nathan Dame Abreu ([nathanabreu/H50-Pro-custom](https://github.com/nathanabreu/H50-Pro-custom));
+patches e app do Home Assistant © Diogo Caseca. Veja [LICENSE](LICENSE).
