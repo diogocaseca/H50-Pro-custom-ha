@@ -65,6 +65,20 @@ Para usar uma cópia local do original no lugar do download, veja o topo do Dock
 
 ## Atualizar quando o original mudar
 
+Para saber se há novidade:
+
+```bash
+tools/check-upstream.sh
+```
+
+Ele compara o `H50_COMMIT` do `build.yaml` com o último commit do original e, se houver commits novos, lista os
+commits e os arquivos alterados (marcando com `*` os que os nossos patches também mexem) e testa, numa cópia temporária,
+se os patches aplicam sobre o commit mais novo. Não altera nada aqui. Código de saída: `0` em dia, `10` há atualização e
+os patches aplicam, `11` há atualização com conflito, `1` erro. `--quiet` imprime só uma linha (para cron ou CI) e
+`--update` já atualiza quando não há conflito.
+
+Para atualizar:
+
 ```bash
 tools/update-upstream.sh <commit-novo-do-original>
 ```
