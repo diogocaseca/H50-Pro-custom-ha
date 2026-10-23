@@ -13,6 +13,15 @@ configuration:
     description: >-
       Servidor em que o robô está na conta Xiaomi (só para o mapa e o cadastro). auto = descobre sozinho.
       us = EUA (contas do Brasil), de = Europa, sg = Singapura, cn = China, ru = Rússia, i2 = Índia.
+  admins:
+    name: Administradores do painel
+    description: >-
+      Login (nome de usuário) de quem entra como administrador no painel, além dos administradores do Home Assistant.
+      O Registro do app mostra o usuário de quem abriu o painel.
+  others:
+    name: Perfil dos demais usuários
+    description: >-
+      operator = comanda o robô (limpeza, cômodos, base, modos) sem mexer em configurações; viewer = só consulta.
   mqtt:
     name: Integração MQTT
     description: >-

@@ -1,6 +1,6 @@
 # App do Home Assistant (antigo "add-on"). Documentação: DOCS.md
 name: H50 Console
-version: "0.2.0"
+version: "0.3.0"
 slug: h50console
 description: Painel local para aspiradores Xiaomi H50 Pro (controle pela rede local; nuvem só para o mapa)
 url: https://github.com/diogocaseca/H50-Pro-custom-ha
@@ -11,13 +11,14 @@ arch:
 init: false
 startup: application
 boot: auto
-# Painel na barra lateral, com login e HTTPS do próprio HA. Só administradores do HA veem o painel (panel_admin),
-# e todo pedido que chega pelo Ingress entra como administrador do H50 Console.
+# Painel na barra lateral, com login e HTTPS do próprio HA, para todos os usuários do HA. O perfil no painel vem do
+# usuário do HA (o Supervisor manda nos cabeçalhos X-Remote-User-*): admin do HA ou listado em `admins` = administrador;
+# os demais = `others` (operador: comanda o robô sem mexer em configurações; ou somente leitura).
 ingress: true
 ingress_port: 8050
 panel_icon: mdi:robot-vacuum
 panel_title: Aspirador
-panel_admin: true
+panel_admin: false
 # Rede do host: necessária para achar o robô por broadcast UDP e falar com ele em UDP 54321.
 # Com a rede do host o Docker não mapeia portas: a 8050 fica aberta na LAN de qualquer jeito. Por isso o acesso
 # direto é controlado pela opção direct_access (desligada = o app recusa quem não vem do Ingress).
@@ -32,6 +33,8 @@ services:
 options:
   direct_access: false
   cloud_region: auto
+  admins: []
+  others: operator
   mqtt: false
   mqtt_discovery_prefix: homeassistant
   log_level: info
@@ -40,6 +43,9 @@ schema:
   viewer_password: password?
   direct_access: bool
   cloud_region: list(auto|us|de|sg|cn|ru|i2)
+  admins:
+    - str
+  others: list(operator|viewer)
   mqtt: bool
   mqtt_discovery_prefix: match(^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$)
   log_level: list(debug|info|warning|error)

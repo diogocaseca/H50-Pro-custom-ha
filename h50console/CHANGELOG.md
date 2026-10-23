@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- O painel aparece para **todos** os usuários do Home Assistant (`panel_admin: false`), com perfil pelo usuário do HA:
+  administradores do HA e os logins da nova opção `admins` entram como administrador; os demais, como **operador**
+  (comanda o robô e escolhe os modos da limpeza, sem mexer em configurações) ou somente leitura (opção `others`).
+- **Atenção ao atualizar:** se o seu Supervisor ainda não informa o grupo do usuário, você entra como operador até
+  colocar o seu login em `admins` (aba Configuração do app). O Registro do app mostra o login de quem abriu o painel.
+- Patch `0006`: perfil operador e perfis pelo usuário do Ingress (`H50_INGRESS_ADMINS`, `H50_INGRESS_OTHERS`), com testes.
+
 ## 0.2.0
 
 - Integração MQTT (opção `mqtt`, desligada por padrão): cada robô vira um dispositivo do Home Assistant por MQTT

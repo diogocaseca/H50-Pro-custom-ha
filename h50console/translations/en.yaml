@@ -13,6 +13,15 @@ configuration:
     description: >-
       Server where the robot is registered in the Xiaomi account (used only for the map and setup). auto = detect.
       us = USA, de = Europe, sg = Singapore, cn = China, ru = Russia, i2 = India.
+  admins:
+    name: Panel administrators
+    description: >-
+      Login (username) of users who get the administrator profile in the panel, besides Home Assistant administrators.
+      The app log shows the username of whoever opened the panel.
+  others:
+    name: Profile of the other users
+    description: >-
+      operator = controls the robot (cleaning, rooms, dock, modes) without changing settings; viewer = read-only.
   mqtt:
     name: MQTT integration
     description: >-

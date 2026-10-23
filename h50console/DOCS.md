@@ -44,6 +44,8 @@ histórico de limpezas.
 | `viewer_password` | vazio | Senha do perfil **somente leitura** no acesso direto (consulta, sem comandos) |
 | `direct_access` | desligado | Liga o acesso direto pela porta 8050. Desligado, o app recusa qualquer conexão que não venha do HA |
 | `cloud_region` | `auto` | Servidor da nuvem Xiaomi em que o robô está: `us` (EUA, onde costumam ficar as contas do Brasil), `de` (Europa), `sg` (Singapura), `cn` (China), `ru` (Rússia), `i2` (Índia). Veja abaixo |
+| `admins` | vazio | Logins de usuários do HA que entram como **administrador** no painel, além dos administradores do HA. Veja [Quem pode fazer o quê](#quem-pode-fazer-o-quê) |
+| `others` | `operator` | Perfil dos demais usuários do HA: `operator` (comanda o robô sem mexer em configurações) ou `viewer` (só consulta) |
 | `mqtt` | desligado | Integração MQTT: cria o robô como dispositivo do HA. Veja [Integração MQTT](#integração-mqtt-robô-como-dispositivo-do-ha) |
 | `mqtt_discovery_prefix` | `homeassistant` | Prefixo do MQTT discovery. Só mude se alterou na integração MQTT do HA |
 | `log_level` | `info` | `debug`, `info`, `warning` ou `error` |
@@ -64,6 +66,32 @@ servidores diferentes (por exemplo, lâmpadas no `us` e o robô no `de`), ele po
 baixa e o robô não aparece em **Adicionar pela conta**. Nesse caso escolha o servidor do robô (é a região escolhida no
 app Xiaomi Home quando o robô foi adicionado), salve e reinicie o app. O servidor em uso aparece em **Robôs**
 ("servidor …"). A opção só afeta a nuvem (mapa e cadastro); os comandos continuam pela rede local.
+
+## Quem pode fazer o quê
+
+O painel aparece na barra lateral de **todos** os usuários do Home Assistant. O perfil de cada um vem do usuário do HA:
+
+| Perfil | Quem | O que pode |
+|---|---|---|
+| Administrador | Administradores do HA e os logins listados em `admins` | Tudo |
+| Operador (`others: operator`, padrão) | Os demais usuários do HA | Ver tudo o que o somente leitura vê; iniciar, pausar, continuar, parar, voltar à base, localizar, limpar cômodos e rotinas, as funções da base (esvaziar pó, lavar e secar o mop) e escolher os modos da limpeza no **Início** (modo, sucção, água, caminho, passadas, atalho) |
+| Somente leitura (`others: viewer`) | Os demais usuários do HA | Só consultar |
+
+O operador **não** mexe na aba **Ajustes** nem nas configurações da estação, não cadastra nem remove robôs, não mexe na
+conta Xiaomi, em senhas, backups, notificações, edição do mapa, consumíveis (zerar) nem no laboratório.
+
+**Como o painel sabe quem é admin:** o Supervisor informa o usuário do HA em cada pedido. As versões mais novas do
+Supervisor também informam o grupo (administrador ou não); nas mais antigas, só o login. Por isso existe a opção `admins`:
+**inclua o seu login** (o nome de usuário com que você entra no HA, não o nome de exibição), por exemplo:
+
+```yaml
+admins:
+  - joao
+```
+
+Se não souber o login, abra o painel e veja o **Registro** do app: aparece
+`Ingress: usuário 'joao' do Home Assistant entrou como operador`. Na aba **Configurações** do painel o mesmo aviso mostra o
+usuário com que você entrou.
 
 ## Integração MQTT (robô como dispositivo do HA)
 
@@ -149,7 +177,10 @@ continua funcionando normalmente. Ao remover um robô no painel, o dispositivo s
 
 ## Segurança
 
-- Pelo Ingress, o HA já autenticou você: o painel entra direto como **administrador**. Só administradores do HA veem o painel.
+- Pelo Ingress, o HA já autenticou você: o painel entra direto, sem senha, com o perfil do seu usuário do HA (veja
+  [Quem pode fazer o quê](#quem-pode-fazer-o-quê)). Os perfis são aplicados pelo servidor do painel, não só escondidos na tela.
+- O usuário só é aceito vindo do gateway do Ingress, e um cabeçalho de usuário repetido (sinal de tentativa de forjar)
+  nunca dá acesso de administrador. Mantenha o Supervisor atualizado: as versões novas reforçam essa proteção.
   O app só confia nas conexões vindas do gateway do Ingress (`172.30.32.2`), conferindo o IP real da conexão.
 - Qualquer outra origem continua exigindo senha, com os mesmos cabeçalhos de segurança do painel fora do HA.
 - Com a integração MQTT ligada, a ponte conversa com o painel por `127.0.0.1` com um token aleatório gerado a cada
@@ -179,7 +210,7 @@ O painel é o [H50 Console](https://github.com/nathanabreu/H50-Pro-custom), de
 [Nathan Dame Abreu](https://github.com/nathanabreu). Este app não guarda uma cópia dele: ao instalar ou atualizar, o
 Home Assistant baixa o original num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica patches pequenos
 (pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login, o modo Ingress
-a escolha do servidor da nuvem e a API local por token usada pela integração MQTT. A ponte MQTT é código deste app.
+a escolha do servidor da nuvem, a API local por token usada pela integração MQTT e os perfis por usuário do HA. A ponte MQTT é código deste app.
 Se um patch não aplicar, a instalação falha em vez de gerar um painel incompleto. Detalhes no
 [repositório do app](https://github.com/diogocaseca/H50-Pro-custom-ha).
 
