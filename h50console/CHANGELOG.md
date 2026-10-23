@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- MQTT: sai o sensor **Detergente** (o H50 Pro não tem reservatório de detergente). A entidade é removida do HA na
+  atualização.
+
 ## 0.3.3
 
 - MQTT: seletores **Caminho** (Rápido, Padrão, Profunda) e **Tempos de limpeza** (Uma vez, Duas vezes) nas

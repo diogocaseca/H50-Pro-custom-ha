@@ -53,8 +53,11 @@ SELECTS = {"suction": ("2/9", "Potência de sucção", FAN_SPEED, "mdi:fan"),
            "clean_times": ("2/8", "Tempos de limpeza", CLEAN_TIMES, "mdi:repeat")}
 CONSUMABLES = {  # item -> (prop de %, nome)
     "main_brush": ("12/1", "Escova principal"), "side_brush": ("13/1", "Escova lateral"), "filter": ("14/1", "Filtro"),
-    "mop": ("9/1", "Mop"), "detergent": ("18/1", "Detergente"), "dust_bag": ("19/1", "Saco de pó"),
+    "mop": ("9/1", "Mop"), "dust_bag": ("19/1", "Saco de pó"),
 }
+# componentes que já foram anunciados e saíram: vão só com a plataforma, que é como o HA remove a entidade de um
+# dispositivo (discovery por dispositivo). Ficam aqui para quem atualiza de uma versão antiga.
+REMOVED = {"consumable_detergent": "sensor"}      # o H50 Pro não tem reservatório de detergente (0.3.4)
 # botões da base (ações simples do painel que não tiram o robô da base)
 BUTTONS = {"dust": ("Esvaziar o pó", "mdi:delete-empty"), "wash-mop": ("Lavar o mop", "mdi:water-sync"),
            "dry": ("Secar o mop", "mdi:fan"), "stop-wash": ("Parar a lavagem", "mdi:water-off"),
@@ -167,6 +170,8 @@ def discovery(robot: dict, version: str = "") -> tuple[str, dict]:
             "p": "sensor", "name": name, "uniq_id": f"{key}_consumable_{item}", **common, "stat_t": t["attrs"],
             "val_tpl": f"{{{{ value_json.consumables.{item} }}}}", "unit_of_meas": "%", "ic": "mdi:progress-wrench",
             "ent_cat": "diagnostic"}
+    for cid, platform in REMOVED.items():
+        cmps[cid] = {"p": platform}
     for sid, (_, name, options, icon) in SELECTS.items():
         cmps[sid] = {"p": "select", "name": name, "uniq_id": f"{key}_{sid}", **common, "stat_t": t["attrs"],
                      "val_tpl": attr(sid), "cmd_t": f"{t['cmd']}/select/{sid}", "ops": list(options.values()),

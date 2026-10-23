@@ -60,7 +60,7 @@ class Mapping(unittest.TestCase):
         self.assertEqual(p["dev"]["ids"], ["h50console_123456"])
         self.assertEqual((p["o"]["sw"], p["dev"]["name"]), ("0.2.0", "Robô da sala"))
         cmps = p["cmps"]
-        ids = [c["uniq_id"] for c in cmps.values()]
+        ids = [c["uniq_id"] for c in cmps.values() if "uniq_id" in c]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertTrue(all("p" in c for c in cmps.values()))
         v = cmps["vacuum"]
@@ -75,6 +75,8 @@ class Mapping(unittest.TestCase):
                          ("select", "config", "h50console/sala/cmd/select/suction", ["Silencioso", "Padrão", "Intenso", "Turbo"]))
         self.assertEqual(s["val_tpl"], "{{ value_json.suction }}")
         self.assertEqual(json.loads(json.dumps(p)), p)
+        self.assertEqual(cmps["consumable_detergent"], {"p": "sensor"})      # removido: só a plataforma
+        self.assertNotIn("detergent", mb.attrs_payload(STATE)["consumables"])
         self.assertEqual(mb.discovery({"id": "x"})[0], "h50console_x")    # sem DID: id do painel
 
 
