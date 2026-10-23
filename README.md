@@ -22,8 +22,9 @@ Primeiro uso, opções e segurança: [h50console/DOCS.md](h50console/DOCS.md).
 repository.yaml            # descreve o repositório para o Supervisor
 h50console/                # o app (slug h50console); é o contexto de build do Supervisor
   config.yaml build.yaml   # build.yaml → args.H50_COMMIT: commit do original usado no build
-  Dockerfile  run.py
-  patches/0001-…0004-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
+  Dockerfile  run.py      # run.py lê as opções; com mqtt ligado, sobe o painel e a ponte
+  mqtt_bridge.py tests/    # ponte MQTT (discovery) e os testes dela
+  patches/0001-…0005-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
 tools/update-upstream.sh   # move os patches para um commit novo do original
 ```
 
@@ -43,6 +44,11 @@ Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta ex
 | 0002 | Redirecionamento relativo para a página de login |
 | 0003 | Modo Ingress (`H50_INGRESS`, `H50_INGRESS_ONLY`) e `H50_LOG_LEVEL`, com testes |
 | 0004 | Servidor da nuvem Xiaomi fixo (`H50_CLOUD_COUNTRY`; opção `cloud_region` do app), com testes |
+| 0005 | API local por token (`H50_API_TOKEN`, só de `127.0.0.1`), usada pela ponte MQTT, com testes |
+
+A **ponte MQTT** ([h50console/mqtt_bridge.py](h50console/mqtt_bridge.py), opção `mqtt` do app) é código deste
+repositório, não um patch: ela só usa a API HTTP do painel, então não conflita com atualizações do original. Os testes
+dela ficam em `h50console/tests/` e rodam no mesmo `docker build --target test`.
 
 ## Testar localmente
 
@@ -50,7 +56,7 @@ Na raiz deste repositório:
 
 ```bash
 H50_COMMIT=$(sed -n 's/^ *H50_COMMIT: *//p' h50console/build.yaml)
-docker build --build-arg H50_COMMIT=$H50_COMMIT --target test h50console       # testes do original + dos patches
+docker build --build-arg H50_COMMIT=$H50_COMMIT --target test h50console       # testes do original, dos patches e da ponte
 docker build --build-arg H50_COMMIT=$H50_COMMIT -t h50console-app h50console   # imagem final (amd64)
 ```
 

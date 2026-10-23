@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Integração MQTT (opção `mqtt`, desligada por padrão): cada robô vira um dispositivo do Home Assistant por MQTT
+  discovery, com aspirador (inclusive limpeza por cômodo), bateria, status, progresso, área, tempo, falha,
+  consumíveis, tanques, carregando, conectividade, modo de limpeza, nível de água e botões da base. Usa o broker do
+  app Mosquitto (dados vindos do Supervisor) e continua 100% local.
+- Patch `0005`: `H50_API_TOKEN` no painel (token de administrador aceito só de `127.0.0.1`), com testes.
+- `run.py` carrega as variáveis do container (s6-overlay) e não grava `__pycache__` em `/data`.
+
 ## 0.1.2
 
 - Opção `cloud_region` (servidor da nuvem Xiaomi: `auto`, `us`, `de`, `sg`, `cn`, `ru`, `i2`) para contas com aparelhos

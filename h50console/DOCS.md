@@ -44,6 +44,8 @@ histórico de limpezas.
 | `viewer_password` | vazio | Senha do perfil **somente leitura** no acesso direto (consulta, sem comandos) |
 | `direct_access` | desligado | Liga o acesso direto pela porta 8050. Desligado, o app recusa qualquer conexão que não venha do HA |
 | `cloud_region` | `auto` | Servidor da nuvem Xiaomi em que o robô está: `us` (EUA, onde costumam ficar as contas do Brasil), `de` (Europa), `sg` (Singapura), `cn` (China), `ru` (Rússia), `i2` (Índia). Veja abaixo |
+| `mqtt` | desligado | Integração MQTT: cria o robô como dispositivo do HA. Veja [Integração MQTT](#integração-mqtt-robô-como-dispositivo-do-ha) |
+| `mqtt_discovery_prefix` | `homeassistant` | Prefixo do MQTT discovery. Só mude se alterou na integração MQTT do HA |
 | `log_level` | `info` | `debug`, `info`, `warning` ou `error` |
 
 ### Acesso direto (opcional)
@@ -63,11 +65,97 @@ baixa e o robô não aparece em **Adicionar pela conta**. Nesse caso escolha o s
 app Xiaomi Home quando o robô foi adicionado), salve e reinicie o app. O servidor em uso aparece em **Robôs**
 ("servidor …"). A opção só afeta a nuvem (mapa e cadastro); os comandos continuam pela rede local.
 
+## Integração MQTT (robô como dispositivo do HA)
+
+Com a opção `mqtt` ligada, cada robô cadastrado no painel vira um **dispositivo** no Home Assistant (MQTT discovery):
+dá para usar o card de aspirador, ver bateria e consumíveis em qualquer dashboard e criar automações.
+
+**Requisitos:** o app **Mosquitto broker** instalado e a integração **MQTT** configurada no HA. O app pega usuário e
+senha do broker sozinho (pelo Supervisor); não há nada para preencher.
+
+**Como ligar:** aba **Configuração** do app → **Integração MQTT** → ligar → **Salvar** → reiniciar o app. O robô aparece
+em **Configurações → Dispositivos e serviços → MQTT**.
+
+**Continua 100% local:** o HA fala com o broker, o broker com o app, e o app com o robô pela rede local. Os comandos
+passam pelo painel, então valem os mesmos bloqueios ("não dá para iniciar agora"), a fila de prioridade e o registro de
+comandos da aba **Diagnóstico**.
+
+### Entidades
+
+| Entidade | O que é |
+|---|---|
+| Aspirador (`vacuum`) | Estado (limpando, na base, pausado, voltando, parado, erro), iniciar/continuar, pausar, parar, voltar à base, localizar, limpeza pontual, potência de sucção e limpeza por cômodo |
+| Bateria, Status, Progresso da limpeza, Área limpa, Tempo de limpeza, Falha | Sensores |
+| Carregando, Tanque de água suja cheio, Tanque de água limpa vazio | Sensores binários |
+| Conectado pela rede local | Diagnóstico: se o painel está conseguindo falar com o robô |
+| Escova principal, Escova lateral, Filtro, Mop, Detergente, Saco de pó | Diagnóstico: vida útil em % |
+| Modo de limpeza, Nível de água do mop | Seletores (configuração) |
+| Esvaziar o pó, Lavar o mop, Secar o mop, Parar a lavagem, Parar a secagem, Autolimpeza da base | Botões |
+
+Se o painel não conseguir falar com o robô, as entidades dele ficam **indisponíveis** (o painel leva até ~1 min para
+perceber, conforme o intervalo de leitura). Se o app parar, todas ficam indisponíveis.
+
+### Cômodos
+
+Os cômodos vêm do mapa (é preciso a conta Xiaomi conectada e o mapa baixado pelo menos uma vez). Eles aparecem como
+**segmentos** do aspirador: nas versões do HA com limpeza por área, associe cada cômodo a uma área do HA. Também dá para
+pedir pelo `vacuum.send_command` (o `id` do cômodo aparece no atributo `segments` do aspirador):
+
+```yaml
+action: vacuum.send_command
+target:
+  entity_id: vacuum.robo_da_sala
+data:
+  command: clean_rooms
+  params:
+    rooms: [3, 5]
+```
+
+Outros comandos: `custom` com `id` (uma rotina do app Xiaomi Home, ex.: `params: {id: 2}`) ou uma ação simples
+(`sweep`, `mop`, `sweep-mop`, `sweep-then-mop`, `dust`, `wash-mop`, `dry`, `charge`...), sem `params`.
+
+### Exemplos
+
+Card de aspirador no dashboard:
+
+```yaml
+type: tile
+entity: vacuum.robo_da_sala
+features:
+  - type: vacuum-commands
+    commands: [start_pause, stop, return_home, locate]
+```
+
+Avisar quando o tanque de água suja encher:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.robo_da_sala_tanque_de_agua_suja_cheio
+    to: "on"
+actions:
+  - action: notify.notify
+    data:
+      message: Esvazie o tanque de água suja do robô.
+```
+
+Os nomes das entidades dependem do nome do robô no painel; confira em **Configurações → Entidades**.
+
+**Atenção:** comandos vindos do HA (automações, cards, voz) **não pedem a confirmação** que o painel pede antes de tirar o
+robô da base. Revise as automações que iniciam limpeza.
+
+Se o app não achar o broker, o **Registro** mostra "nenhum broker encontrado" e a ponte tenta de novo sozinha; o painel
+continua funcionando normalmente. Ao remover um robô no painel, o dispositivo sai do HA.
+
 ## Segurança
 
 - Pelo Ingress, o HA já autenticou você: o painel entra direto como **administrador**. Só administradores do HA veem o painel.
   O app só confia nas conexões vindas do gateway do Ingress (`172.30.32.2`), conferindo o IP real da conexão.
 - Qualquer outra origem continua exigindo senha, com os mesmos cabeçalhos de segurança do painel fora do HA.
+- Com a integração MQTT ligada, a ponte conversa com o painel por `127.0.0.1` com um token aleatório gerado a cada
+  início (nunca gravado). O token só vale vindo do próprio app: da rede, nem com ele o painel abre.
+- Quem consegue publicar no seu broker MQTT consegue comandar o robô: mantenha o Mosquitto com usuário e senha (o padrão
+  do app Mosquitto do HA).
 
 ## Dados e backup
 
@@ -91,7 +179,7 @@ O painel é o [H50 Console](https://github.com/nathanabreu/H50-Pro-custom), de
 [Nathan Dame Abreu](https://github.com/nathanabreu). Este app não guarda uma cópia dele: ao instalar ou atualizar, o
 Home Assistant baixa o original num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica patches pequenos
 (pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login, o modo Ingress
-e a escolha do servidor da nuvem.
+a escolha do servidor da nuvem e a API local por token usada pela integração MQTT. A ponte MQTT é código deste app.
 Se um patch não aplicar, a instalação falha em vez de gerar um painel incompleto. Detalhes no
 [repositório do app](https://github.com/diogocaseca/H50-Pro-custom-ha).
 
