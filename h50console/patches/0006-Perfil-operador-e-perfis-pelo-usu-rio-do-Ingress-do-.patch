@@ -1,0 +1,383 @@
+From e0903e3546f8b21645b344218b357f5ce111afd5 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Fri, 23 Oct 2026 00:07:53 -0300
+Subject: [PATCH] =?UTF-8?q?Perfil=20operador=20e=20perfis=20pelo=20usu?=
+ =?UTF-8?q?=C3=A1rio=20do=20Ingress=20do=20HA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Com H50_INGRESS_OTHERS (operator|viewer), quem chega pelo Ingress recebe o
+perfil pelo usuário do HA que o Supervisor manda em X-Remote-User-*: admin do
+HA (grupo system-admin) ou listado em H50_INGRESS_ADMINS entra como
+administrador; os demais, como H50_INGRESS_OTHERS. Cabeçalho repetido (tentativa
+de forjar) nunca dá administrador, e esses cabeçalhos só valem vindos do gateway.
+
+Operador: o que o visualizador vê, mais comandar o robô (ações de limpeza e da
+base, cômodos, rotinas, atualizar o mapa) e escolher os modos da próxima
+limpeza (2/4, 2/9, 2/10, 2/74, 2/8, 2/83). Ajustes, robôs, conta, backups e
+laboratório continuam só do administrador. A interface esconde o que o
+operador não usa e mostra com qual usuário ele entrou.
+
+Sem H50_INGRESS_OTHERS, nada muda (todo pedido do Ingress é administrador).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/__main__.py      |  9 +++-
+ h50console/config.py        |  8 +++-
+ h50console/static/app.js    | 13 ++++-
+ h50console/static/style.css |  6 +++
+ h50console/web.py           | 74 +++++++++++++++++++++++++----
+ tests/test_auth.py          | 95 +++++++++++++++++++++++++++++++++++++
+ 6 files changed, 191 insertions(+), 14 deletions(-)
+
+diff --git a/h50console/__main__.py b/h50console/__main__.py
+index ef19218..ba75796 100644
+--- a/h50console/__main__.py
++++ b/h50console/__main__.py
+@@ -48,18 +48,25 @@ def serve(cfg: Config) -> int:
+                          "Ative a senha (padrão) ou use H50_HOST=127.0.0.1.")
+     if cfg.ingress_only and not cfg.ingress:
+         raise SystemExit("H50_INGRESS_ONLY só faz sentido com H50_INGRESS=true.")
++    if cfg.ingress_others and not cfg.ingress:
++        raise SystemExit("H50_INGRESS_OTHERS só faz sentido com H50_INGRESS=true.")
+     auth = Auth(cfg.data_dir, enabled=cfg.auth_enabled, env_password=cfg.password, viewer_password=cfg.viewer_password)
+     fleet = _fleet(cfg, start_threads=True)     # robots.json; migra instalação antiga ou H50_IP/H50_TOKEN na 1ª vez
+     notifier = Notifier(NotifyStore(cfg.data_dir / "notify.json"))
+     hub = Hub(fleet, fleet.cloud, cfg.raw_enabled, auth=auth, ring=ring, notifier=notifier)
+     srv = make_server(hub, cfg.host, cfg.port, auth=auth, trust_proxy=cfg.trust_proxy, cookie_secure=cfg.cookie_secure,
+                       extra_hosts=cfg.allowed_hosts, metrics_token=cfg.metrics_token, ingress=cfg.ingress,
+-                      ingress_only=cfg.ingress_only, api_token=cfg.api_token)
++                      ingress_only=cfg.ingress_only, api_token=cfg.api_token, ingress_admins=cfg.ingress_admins,
++                      ingress_others=cfg.ingress_others)
+ 
+     fleet.start_all()
+     names = ", ".join(f"{r.cfg.name} ({r.cfg.transport})" for r in fleet.robots.values()) or "nenhum (cadastre na interface)"
+     log.info("H50 Console %s | dados em %s | robôs: %s", __version__, cfg.data_dir, names)
+     log.info("painel em http://%s:%s  (Ctrl+C para sair)", cfg.host, cfg.port)
++    if cfg.ingress and cfg.ingress_others:
++        log.info("Ingress: administradores = admins do HA%s; demais usuários = %s",
++                 f" + {', '.join(cfg.ingress_admins)}" if cfg.ingress_admins else "",
++                 "operador" if cfg.ingress_others == "operator" else "somente leitura")
+     if cfg.api_token:
+         log.info("API local por token ligada (só de 127.0.0.1)")
+     if cfg.cloud_country:
+diff --git a/h50console/config.py b/h50console/config.py
+index 1fd1e19..80880a5 100644
+--- a/h50console/config.py
++++ b/h50console/config.py
+@@ -45,6 +45,8 @@ class Config:
+     ingress: bool = False              # H50_INGRESS: app do Home Assistant; o gateway do Ingress conta como administrador
+     ingress_only: bool = False         # H50_INGRESS_ONLY: recusa quem não vem do Ingress (nem do loopback)
+     log_level: str = "INFO"            # H50_LOG_LEVEL: DEBUG, INFO, WARNING ou ERROR
++    ingress_admins: tuple = ()         # H50_INGRESS_ADMINS: usuários do HA (login) que entram como administrador
++    ingress_others: str = ""           # H50_INGRESS_OTHERS: perfil dos demais (operator|viewer); vazio = todos administradores
+     api_token: str = ""                # H50_API_TOKEN: Bearer de administrador, só de 127.0.0.1 (ponte MQTT do app do HA)
+     cloud_country: str = ""            # H50_CLOUD_COUNTRY: servidor da nuvem Xiaomi (us, de, sg...); vazio/auto = descobre
+     # migração de instalações de um robô só (usados apenas se não houver robots.json)
+@@ -59,6 +61,9 @@ class Config:
+         token = e.get("H50_TOKEN", "")
+         if token and len(token) != 32:
+             raise SystemExit("H50_TOKEN deve ter 32 caracteres hexadecimais")
++        others = e.get("H50_INGRESS_OTHERS", "").strip().lower()
++        if others not in ("", "operator", "viewer"):
++            raise SystemExit("H50_INGRESS_OTHERS deve ser operator ou viewer")
+         api_token = e.get("H50_API_TOKEN", "").strip()
+         if api_token and len(api_token) < 32:
+             raise SystemExit("H50_API_TOKEN precisa ter pelo menos 32 caracteres")
+@@ -80,7 +85,8 @@ class Config:
+             allowed_hosts=tuple(h.strip().lower() for h in e.get("H50_ALLOWED_HOSTS", "").split(",") if h.strip()),
+             ingress=_bool(e.get("H50_INGRESS")), ingress_only=_bool(e.get("H50_INGRESS_ONLY")),
+             log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO", cloud_country=country,
+-            api_token=api_token,
++            api_token=api_token, ingress_others=others,
++            ingress_admins=tuple(a.strip() for a in e.get("H50_INGRESS_ADMINS", "").split(",") if a.strip()),
+             ip=e.get("H50_IP", ""), token=token, device_name=e.get("H50_NAME", ""),
+         )
+ 
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index 7809de7..0546091 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -335,7 +335,9 @@
+       b.onclick = () => openStation(id);
+       return b;
+     };
+-    tabs.append(mk("funcao", "Função"), mk("config", "Configurações"));
++    tabs.append(mk("funcao", "Função"));
++    if (document.body.classList.contains("operator")) tab = "funcao";    // configurações da estação: só administrador
++    else tabs.append(mk("config", "Configurações"));
+     let content;
+     if (tab === "funcao") {
+       const act = (label, name, on) => {
+@@ -722,7 +724,14 @@
+     const auth = await fetch(rel("/api/auth/status")).then((r) => r.json()).catch(() => ({ enabled: false }));
+     $("#sec-card").hidden = !auth.enabled;
+     document.body.classList.toggle("viewer", auth.role === "viewer");
+-    if (auth.role === "viewer") $("#sec-note").textContent = "Você entrou com o perfil somente leitura.";
++    document.body.classList.toggle("operator", auth.role === "operator");
++    const who = auth.ingress_user ? ` (usuário "${auth.ingress_user}" do Home Assistant)` : "";
++    if (auth.role === "viewer") $("#sec-note").textContent = `Você entrou com o perfil somente leitura${who}.`;
++    if (auth.role === "operator") {
++      $("#sec-note").textContent = `Você entrou como operador${who}: dá para comandar o robô e escolher os modos de limpeza, `
++        + "mas não mexer em ajustes, robôs ou na conta. Um administrador do Home Assistant tem acesso completo; "
++        + `para liberar outro usuário, inclua o login dele na opção "admins" do app.`;
++    }
+     const viewerCard = $("#viewer-card");
+     viewerCard.hidden = !(auth.enabled && auth.role === "admin");
+     const viewerShow = (on) => { $("#viewer-state").textContent = on ? "Ligado" : "Desligado"; $("#viewer-off").hidden = !on; };
+diff --git a/h50console/static/style.css b/h50console/static/style.css
+index e8d226b..009051e 100644
+--- a/h50console/static/style.css
++++ b/h50console/static/style.css
+@@ -204,6 +204,12 @@ body.viewer #tabs a[href="#laboratorio"], body.viewer .home-side, body.viewer #h
+ body.viewer #t-settings, body.viewer #notify-card, body.viewer #viewer-card, body.viewer #sec-pw, body.viewer #sec-all,
+ body.viewer #map-edit, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
+ body.viewer .home { grid-template-columns: 1fr; }
++/* operador (Ingress do HA): comanda o robô e escolhe os modos; o resto é do administrador */
++body.operator #tabs a[href="#robos"], body.operator #tabs a[href="#diagnostico"], body.operator #tabs a[href="#manutencao"],
++body.operator #tabs a[href="#laboratorio"], body.operator #hist-sync, body.operator #t-consumables button,
++body.operator #t-settings, body.operator #notify-card, body.operator #viewer-card, body.operator #sec-pw,
++body.operator #sec-all, body.operator #map-edit, body.operator #onboarding, body.operator #qr-start,
++body.operator #cloud-connect .bar { display: none; }
+ .badge-viewer { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2, rgba(128,128,128,.18)); }
+ td button { white-space: nowrap; }
+ 
+diff --git a/h50console/web.py b/h50console/web.py
+index 5e9fd1e..fadadd5 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -50,6 +50,16 @@ VIEWER_GET = re.compile(
+     r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status)")
+ # único POST do visualizador: atualizar o mapa a partir da nuvem (só baixa; não mexe no robô)
+ VIEWER_POST = re.compile(r"/api/r/[\w-]+/cloud/map")
++# perfil operador (Ingress do HA, usuários que não são administradores): o que o visualizador vê, mais comandar o robô e
++# escolher os modos da próxima limpeza (os do Início). Ajustes, robôs, conta, backups e o laboratório ficam com o admin.
++OPERATOR_ACTIONS = ("start", "stop", "home", "pause", "resume", "sweep", "mop", "sweep-mop", "sweep-then-mop", "spot",
++                    "locate", "charge", "dust", "wash-mop", "dry", "stop-wash", "stop-dry", "self-clean-base")
++OPERATOR_SETTINGS = ("2-4", "2-9", "2-10", "2-74", "2-8", "2-83")   # modo, sucção, água, caminho, passadas, atalho
++_ROBOT_API = r"/api(?:/r/[\w-]+)?"
++OPERATOR_POST = re.compile(_ROBOT_API + r"/(?:actions/(?:" + "|".join(map(re.escape, OPERATOR_ACTIONS)) + r")"
++                           r"|clean/rooms|clean/custom/\d+|cloud/map)")
++OPERATOR_PUT = re.compile(_ROBOT_API + r"/settings/(?:" + "|".join(OPERATOR_SETTINGS) + r")")
++INGRESS_ROLES = ("operator", "viewer")
+ LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+ 
+ 
+@@ -630,7 +640,10 @@ CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+ 
+ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool = False, local_only: bool = False,
+                  extra_hosts=(), metrics_token: str = "", ingress: bool = False, ingress_only: bool = False,
+-                 ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "", api_token_source: str = API_TOKEN_SOURCE):
++                 ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "", api_token_source: str = API_TOKEN_SOURCE,
++                 ingress_admins=(), ingress_others: str = ""):
++    ingress_admins = {a.casefold() for a in ingress_admins}
++    seen_users: dict[str, str] = {}             # usuário do HA -> perfil (registra no log quando muda)
+     streams = {"n": 0}
+     streams_lock = threading.Lock()
+     class Handler(BaseHTTPRequestHandler):
+@@ -734,8 +747,39 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+             got = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+             return hmac.compare_digest(got.encode(), api_token.encode())
+ 
++        def _ingress_user(self) -> str | None:
++            names = self.headers.get_all("X-Remote-User-Name") or []
++            return names[0].strip() if len(names) == 1 else None
++
++        def _gateway_role(self) -> str:
++            role = self._gateway_role_of_headers()
++            user = self._ingress_user() or "?"
++            if ingress_others and seen_users.get(user) != role:
++                seen_users[user] = role
++                log.info("Ingress: usuário %r do Home Assistant entrou como %s", user,
++                         {"admin": "administrador", "operator": "operador", "viewer": "somente leitura"}[role])
++            return role
++
++        def _gateway_role_of_headers(self) -> str:
++            """Perfil de quem chega pelo Ingress. O Supervisor manda o usuário do HA em X-Remote-User-* (e apaga cópias
++            vindas do navegador). Admin do HA (grupo system-admin) ou listado em H50_INGRESS_ADMINS: administrador; os
++            demais: H50_INGRESS_OTHERS. Sem essa variável, todos são administradores (comportamento anterior)."""
++            if not ingress_others:
++                return "admin"
++            groups = self.headers.get_all("X-Remote-User-Groups") or []
++            names = self.headers.get_all("X-Remote-User-Name") or []
++            if len(groups) > 1 or len(names) > 1:       # cabeçalho repetido: tentativa de forjar; nunca é admin
++                return ingress_others
++            if groups and "system-admin" in {g.strip() for g in groups[0].split(",")}:
++                return "admin"
++            if names and names[0].strip().casefold() in ingress_admins:
++                return "admin"
++            return ingress_others
++
+         def _role(self) -> str | None:
+-            if auth is None or not auth.enabled or self._from_gateway() or self._from_api_token():
++            if self._from_gateway():
++                return self._gateway_role()
++            if auth is None or not auth.enabled or self._from_api_token():
+                 return "admin"
+             return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
+ 
+@@ -765,7 +809,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+                 if path == "/api/auth/status" and method == "GET":
+                     st = auth.status(self._authed(), self._role())
+                     if self._from_gateway():             # nunca mostra login/primeiro acesso dentro do HA
+-                        st.update(setup_required=False, ingress=True)
++                        st.update(setup_required=False, ingress=True, ingress_user=self._ingress_user())
+                     return self._send(200, st)
+                 if path == "/api/auth/activity" and method == "GET":
+                     if self._role() != "admin":
+@@ -830,9 +874,15 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+                     return self._redirect(up + "login.html?next=" + quote("./" + self.path.lstrip("/"), safe=""))
+                 if method != "GET" and not self._csrf_ok():
+                     return self._send(403, {"error": "requisição bloqueada (CSRF)"})
+-                if self._role() == "viewer" and not ((method == "GET" and (VIEWER_GET.fullmatch(path) or not path.startswith("/api/")))
+-                                                     or (method == "POST" and VIEWER_POST.fullmatch(path))):
+-                    return self._send(403, {"error": "perfil somente leitura"})
++                role = self._role()
++                if role in ("viewer", "operator"):
++                    read_ok = ((method == "GET" and (VIEWER_GET.fullmatch(path) or not path.startswith("/api/")))
++                               or (method == "POST" and VIEWER_POST.fullmatch(path)))
++                    if role == "viewer" and not read_ok:
++                        return self._send(403, {"error": "perfil somente leitura"})
++                    if role == "operator" and not (read_ok or (method == "POST" and OPERATOR_POST.fullmatch(path))
++                                                   or (method == "PUT" and OPERATOR_PUT.fullmatch(path))):
++                        return self._send(403, {"error": "perfil operador: só comandos do robô e modos de limpeza"})
+             if method == "GET" and path == "/api/stream":
+                 return self._stream(hub.bus)                       # eventos da conta
+             m = STREAM_PATH.fullmatch(path)
+@@ -857,9 +907,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+                 return self._send(400, {"error": err})
+             try:
+                 result = hub.dispatch(method, path, parse_qs(url.query), body)
+-                if path.endswith("/cloud/status") and self._role() == "viewer":   # sem QR, conta nem país
++                limited = self._role() in ("viewer", "operator")
++                if path.endswith("/cloud/status") and limited:            # sem QR, conta nem país
+                     result = {"state": result.get("state")}
+-                if path == "/api/robots" and self._role() == "viewer":      # o visualizador não precisa de IP, DID nem pastas
++                if path == "/api/robots" and limited:                     # sem IP, DID nem pastas
+                     keep = ("id", "name", "model", "online", "via", "status", "status_label", "battery", "active", "supported")
+                     result = [{k: r[k] for k in keep if k in r} for r in result]
+                 if isinstance(result, Raw):
+@@ -937,11 +988,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+ def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,
+                 cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "", ingress: bool = False,
+                 ingress_only: bool = False, ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "",
+-                api_token_source: str = API_TOKEN_SOURCE) -> ThreadingHTTPServer:
++                api_token_source: str = API_TOKEN_SOURCE, ingress_admins=(), ingress_others: str = "") -> ThreadingHTTPServer:
++    if ingress_others and ingress_others not in INGRESS_ROLES:
++        raise ValueError(f"ingress_others deve ser um de {INGRESS_ROLES}")
+     local_only = is_loopback(host) and not trust_proxy
+     srv = ThreadingHTTPServer((host, port), make_handler(hub, auth, trust_proxy, cookie_secure, local_only,
+                                                          {h.lower() for h in extra_hosts}, metrics_token,
+                                                          ingress, ingress_only and ingress, ingress_gateway,
+-                                                         api_token, api_token_source))
++                                                         api_token, api_token_source, ingress_admins,
++                                                         ingress_others if ingress else ""))
+     srv.daemon_threads = True
+     return srv
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 5ac30a2..fef2ed0 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -473,3 +473,98 @@ class IngressHttp(unittest.TestCase):
+         self.assertEqual(st, 401)
+         self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
+         self.assertIn("frame-ancestors 'none'", r.getheader("Content-Security-Policy"))
++
++
++@unittest.skipUnless(sys.platform.startswith("linux"), "precisa de 127.0.0.2/127.0.0.3 como origem (Linux)")
++class IngressRoles(unittest.TestCase):
++    """Perfis pelo Ingress: admin do HA ou listado em H50_INGRESS_ADMINS = administrador; os demais = operador."""
++
++    def setUp(self):
++        self.s = Server(self, ingress=True, ingress_gateway=GW, ingress_admins=("Caseca",), ingress_others="operator")
++
++    def req(self, method, path, user=None, groups=None, body=None, raw_headers=(), source=GW):
++        c = http.client.HTTPConnection("127.0.0.1", self.s.port, timeout=5, source_address=(source, 0))
++        c.putrequest(method, path, skip_host=True)
++        headers = [("Host", f"127.0.0.1:{self.s.port}"), ("X-H50", "1")]
++        if user is not None:
++            headers.append(("X-Remote-User-Name", user))
++        if groups is not None:
++            headers.append(("X-Remote-User-Groups", groups))
++        data = json.dumps(body).encode() if body is not None else b""
++        if method != "GET":
++            headers += [("Content-Type", "application/json"), ("Content-Length", str(len(data)))]
++        for k, v in [*headers, *raw_headers]:
++            c.putheader(k, v)
++        c.endheaders(data or None)
++        r = c.getresponse()
++        raw = r.read()
++        c.close()
++        try:
++            return r.status, json.loads(raw)
++        except ValueError:
++            return r.status, raw
++
++    def role(self, **kw):
++        st, body = self.req("GET", "/api/auth/status", **kw)
++        self.assertEqual(st, 200)
++        return body["role"]
++
++    def test_who_is_admin(self):
++        self.assertEqual(self.role(user="caseca"), "admin")                         # lista de admins, sem caixa
++        self.assertEqual(self.role(user="maria", groups="system-users,system-admin"), "admin")   # grupo do HA
++        self.assertEqual(self.role(user="maria", groups="system-users"), "operator")
++        self.assertEqual(self.role(user="maria"), "operator")
++        self.assertEqual(self.role(), "operator")                                   # sem usuário: nunca admin
++        _, st = self.req("GET", "/api/auth/status", user="maria")
++        self.assertEqual(st["ingress_user"], "maria")
++        self.assertEqual(self.req("POST", "/api/robots", user="caseca", body={})[0] != 403, True)
++
++    def test_repeated_headers_are_never_admin(self):
++        self.assertEqual(self.role(user="maria", raw_headers=[("X-Remote-User-Name", "caseca")]), "operator")
++        self.assertEqual(self.role(user="caseca", raw_headers=[("x-remote-user-name", "caseca")]), "operator")
++        self.assertEqual(self.role(user="maria", groups="system-users",
++                                   raw_headers=[("X-Remote-User-Groups", "system-admin")]), "operator")
++
++    def test_user_headers_only_count_from_the_gateway(self):
++        st, _ = self.req("GET", "/api/robots", user="caseca", groups="system-admin", source=OTHER)
++        self.assertEqual(st, 401)
++
++    def test_operator_commands_the_robot_but_does_not_configure(self):
++        allowed = [("POST", "/api/r/sala/actions/start"), ("POST", "/api/actions/dust"), ("POST", "/api/r/sala/actions/home"),
++                   ("POST", "/api/r/sala/clean/rooms"), ("POST", "/api/r/sala/clean/custom/2"),
++                   ("POST", "/api/r/sala/cloud/map"), ("PUT", "/api/r/sala/settings/2-9"), ("PUT", "/api/settings/2-4"),
++                   ("PUT", "/api/r/sala/settings/2-83"), ("GET", "/api/r/sala/state"), ("GET", "/api/robots")]
++        blocked = [("POST", "/api/robots"), ("DELETE", "/api/robots/sala"), ("PUT", "/api/robots/sala"),
++                   ("PUT", "/api/r/sala/settings/2-32"), ("PUT", "/api/r/sala/settings/11-2"),
++                   ("POST", "/api/r/sala/actions/build-map"), ("POST", "/api/r/sala/actions/try-listen"),
++                   ("POST", "/api/r/sala/raw/get"), ("POST", "/api/r/sala/consumables/filter/reset"),
++                   ("POST", "/api/cloud/qr"), ("POST", "/api/cloud/logout"), ("POST", "/api/r/sala/cloud/history"),
++                   ("POST", "/api/r/sala/map/edit/save"), ("PUT", "/api/r/sala/app/name"), ("GET", "/api/r/sala/commands"),
++                   ("POST", "/api/r/sala/actions/start/../../robots"), ("POST", "/api/auth/viewer"),
++                   ("POST", "/api/auth/password")]
++        for method, path in allowed:
++            st, body = self.req(method, path, user="maria", body={} if method != "GET" else None)
++            self.assertNotEqual(st, 403, (method, path, body))
++        for method, path in blocked:
++            st, _ = self.req(method, path, user="maria", body={} if method != "GET" else None)
++            self.assertEqual(st, 403, (method, path))
++        # o admin passa onde o operador é barrado
++        self.assertNotEqual(self.req("PUT", "/api/r/sala/settings/2-32", user="caseca", body={})[0], 403)
++
++    def test_viewer_option(self):
++        s = Server(self, ingress=True, ingress_gateway=GW, ingress_others="viewer")
++        self.s = s
++        self.assertEqual(self.role(user="maria"), "viewer")
++        self.assertEqual(self.req("POST", "/api/r/sala/actions/start", user="maria", body={})[0], 403)
++        self.assertEqual(self.role(user="x", groups="system-admin"), "admin")
++
++    def test_config(self):
++        import os
++        from unittest import mock
++        from h50console.config import Config
++        env = {"H50_INGRESS_ADMINS": " caseca, Ana ,", "H50_INGRESS_OTHERS": "Operator"}
++        with mock.patch.dict(os.environ, env):
++            c = Config.from_env("/nao/existe/.env")
++        self.assertEqual((c.ingress_admins, c.ingress_others), (("caseca", "Ana"), "operator"))
++        with mock.patch.dict(os.environ, {"H50_INGRESS_OTHERS": "admin"}), self.assertRaises(SystemExit):
++            Config.from_env("/nao/existe/.env")
+-- 
+2.53.0
+
