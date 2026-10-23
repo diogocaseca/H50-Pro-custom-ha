@@ -44,9 +44,13 @@ PAUSED = 5
 FAN_SPEED = {1: "Silencioso", 2: "Padrão", 3: "Intenso", 4: "Turbo"}                                       # 2/9
 CLEAN_MODE = {1: "Aspirando", 3: "Aspirando e esfregando", 4: "Aspirar antes de esfregar", 2: "Esfregando"}  # 2/4
 WATER_LEVEL = {0: "Desligada", 1: "Nível 1", 2: "Nível 2", 3: "Nível 3"}                                    # 2/10
+CLEAN_ROUTE = {1: "Rápido", 2: "Padrão", 3: "Profunda"}                                                    # 2/74
+CLEAN_TIMES = {1: "Uma vez", 2: "Duas vezes"}       # 2/8: o painel e o app Xiaomi Home só oferecem 1 ou 2 passadas
 SELECTS = {"suction": ("2/9", "Potência de sucção", FAN_SPEED, "mdi:fan"),
            "clean_mode": ("2/4", "Modo de limpeza", CLEAN_MODE, "mdi:broom"),
-           "water_level": ("2/10", "Nível de água do mop", WATER_LEVEL, "mdi:water")}
+           "water_level": ("2/10", "Nível de água do mop", WATER_LEVEL, "mdi:water"),
+           "clean_route": ("2/74", "Caminho", CLEAN_ROUTE, "mdi:map-marker-path"),
+           "clean_times": ("2/8", "Tempos de limpeza", CLEAN_TIMES, "mdi:repeat")}
 CONSUMABLES = {  # item -> (prop de %, nome)
     "main_brush": ("12/1", "Escova principal"), "side_brush": ("13/1", "Escova lateral"), "filter": ("14/1", "Filtro"),
     "mop": ("9/1", "Mop"), "detergent": ("18/1", "Detergente"), "dust_bag": ("19/1", "Saco de pó"),
@@ -101,6 +105,8 @@ def attrs_payload(state: dict) -> dict:
         "suction": FAN_SPEED.get(v.get("2/9")),
         "clean_mode": CLEAN_MODE.get(v.get("2/4")),
         "water_level": WATER_LEVEL.get(v.get("2/10")),
+        "clean_route": CLEAN_ROUTE.get(v.get("2/74")),
+        "clean_times": CLEAN_TIMES.get(v.get("2/8")),
         "consumables": {item: _num(v.get(p)) for item, (p, _) in CONSUMABLES.items()},
     }
 

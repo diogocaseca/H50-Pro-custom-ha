@@ -11,7 +11,7 @@ from h50console import catalog
 
 ROBOT = {"id": "sala", "name": "Robô da sala", "model": "xiaomi.vacuum.ov42gl", "did": "123456"}
 STATE = {"health": {"online": True}, "status": 4, "status_label": "Limpando", "battery": 87,
-         "values": {"2/2": 4, "3/1": 87, "3/2": 2, "2/9": 3, "2/4": 3, "2/10": 2, "2/89": 40, "2/6": 1234, "2/7": 600,
+         "values": {"2/2": 4, "3/1": 87, "3/2": 2, "2/9": 3, "2/4": 3, "2/10": 2, "2/74": 1, "2/8": 2, "2/89": 40, "2/6": 1234, "2/7": 600,
                     "2/3": 0, "2/97": 1, "2/98": 0, "12/1": 90, "13/1": 80, "14/1": 70, "9/1": 60, "18/1": 50,
                     "19/1": None}}
 ROOMS = [{"id": 3, "name": "Sala", "last_clean": None}, {"id": 5, "name": "Cozinha", "last_clean": None}]
@@ -27,6 +27,11 @@ class Mapping(unittest.TestCase):
         self.assertEqual(mb.FAN_SPEED, catalog.ENUM_PT["2/9"])
         self.assertEqual(mb.CLEAN_MODE, catalog.ENUM_PT["2/4"])
         self.assertEqual(mb.WATER_LEVEL, catalog.ENUM_PT["2/10"])
+        self.assertEqual(mb.CLEAN_ROUTE, catalog.ENUM_PT["2/74"])
+        self.assertTrue(mb.CLEAN_TIMES.items() <= catalog.ENUM_PT["2/8"].items())
+        for key, *_ in mb.SELECTS.values():                               # o operador do painel também pode mudar
+            from h50console.web import OPERATOR_SETTINGS
+            self.assertIn(key.replace("/", "-"), OPERATOR_SETTINGS)
         for item, (prop, _) in mb.CONSUMABLES.items():
             self.assertEqual(prop, catalog.CONSUMABLE_PROPS[item][0])
         self.assertTrue(mb.SEND_ACTIONS <= set(catalog.SIMPLE_ACTIONS))
@@ -42,6 +47,7 @@ class Mapping(unittest.TestCase):
                          (87, False, 40, 12.34, 600, "Nenhuma"))
         self.assertEqual((a["dirty_tank_full"], a["clean_tank_empty"]), (True, False))
         self.assertEqual((a["clean_mode"], a["water_level"], a["suction"]), ("Aspirando e esfregando", "Nível 2", "Intenso"))
+        self.assertEqual((a["clean_route"], a["clean_times"]), ("Rápido", "Duas vezes"))
         self.assertEqual(a["consumables"]["main_brush"], 90)
         self.assertIsNone(a["consumables"]["dust_bag"])
         idle = mb.attrs_payload({"status": 2, "values": {"2/89": -1, "3/2": 1, "2/3": 210013}})
@@ -92,6 +98,10 @@ class Commands(unittest.TestCase):
         self.assertEqual(self.calls("select/water_level", "Nível 3"), [("PUT", "/api/r/sala/settings/2-10", {"value": 3})])
         self.assertEqual(self.calls("select/clean_mode", "Esfregando")[0][2], {"value": 2})
         self.assertEqual(self.calls("select/suction", "Turbo"), [("PUT", "/api/r/sala/settings/2-9", {"value": 4})])
+        self.assertEqual(self.calls("select/clean_route", "Profunda"), [("PUT", "/api/r/sala/settings/2-74", {"value": 3})])
+        self.assertEqual(self.calls("select/clean_times", "Duas vezes"), [("PUT", "/api/r/sala/settings/2-8", {"value": 2})])
+        with self.assertRaises(mb.CommandError):
+            self.calls("select/clean_times", "Três vezes")
         self.assertEqual(self.calls("button/dust", "PRESS"), [("POST", "/api/r/sala/actions/dust", None)])
         self.assertEqual(self.calls("segments", '["3", "5"]'), [("POST", "/api/r/sala/clean/rooms", {"ids": [3, 5]})])
         for sub, payload in (("fan_speed", "Máximo"), ("select/x", "a"), ("button/start", "PRESS"),

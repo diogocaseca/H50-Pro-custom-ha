@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- MQTT: seletores **Caminho** (Rápido, Padrão, Profunda) e **Tempos de limpeza** (Uma vez, Duas vezes) nas
+  configurações do dispositivo, como na tela "Selecionar modo" do painel.
+
 ## 0.3.2
 
 - MQTT: seletor **Potência de sucção** (Silencioso, Padrão, Intenso, Turbo) nas configurações do dispositivo, ao lado
