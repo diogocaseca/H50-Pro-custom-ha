@@ -1,0 +1,114 @@
+From 5f2ebb17b83320211f5b61acf85d93768c86c0d0 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Fri, 23 Oct 2026 15:58:31 -0300
+Subject: [PATCH] Rotina personalizada: aplica o modo de limpeza da rotina
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A rotina era executada só com os cômodos (ação 2/16), e o robô usava o modo
+global (2/4): uma rotina "só aspirar" saía com pano se o modo estivesse com
+mop. Agora o modo da rotina (campo "mop" do 2/42) é gravado antes de limpar.
+Rotina com modos diferentes por cômodo é recusada (o 2/42 não diz qual
+cômodo usa qual modo). Se o robô não pode sair ou o ajuste falha, nada é
+iniciado.
+---
+ h50console/gateway.py |  4 ++++
+ h50console/web.py     | 16 ++++++++++++++--
+ tests/test_web.py     | 38 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/h50console/gateway.py b/h50console/gateway.py
+index 0ad9e1c..36648a7 100644
+--- a/h50console/gateway.py
++++ b/h50console/gateway.py
+@@ -157,6 +157,10 @@ class Gateway:
+             self.bus.publish("command", {"command": label, "code": code, "error": err})
+             self.poke.set()
+ 
++    def check_start(self) -> None:
++        """Levanta CommandBlocked se o robô não pode sair da base agora (antes de mudar ajustes para uma limpeza)."""
++        self._check_start("start")
++
+     def run(self, name: str, source: str = "ui"):
+         """Ação simples pelo nome (start, home, dust, locate…)."""
+         if name not in catalog.SIMPLE_ACTIONS:
+diff --git a/h50console/web.py b/h50console/web.py
+index fadadd5..70f99a2 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -485,8 +485,20 @@ class App:
+             raise ApiError(404, "rotina não encontrada")
+         if not routine["room_ids"]:
+             raise ApiError(409, "rotina sem cômodos: disparo nativo ainda não descoberto (P3)")
+-        # P3 pendente: usa a limpeza por cômodos com os cômodos da rotina
+-        return {"fallback": "clean_rooms", **self.gw.clean_rooms(routine["room_ids"])}
++        # P3 pendente: usa a limpeza por cômodos com os cômodos da rotina. A ação 2/16 não leva o modo: o robô
++        # usaria o modo global (2/4), que pode estar com pano numa rotina "só aspirar". Grava antes o modo da rotina.
++        modes = sorted(set(routine["mop"]))
++        if len(modes) > 1:
++            raise ApiError(409, "esta rotina usa modos diferentes por cômodo; rode pelo app Xiaomi Home")
++        if modes and modes[0] not in catalog.ENUM_PT["2/4"]:
++            raise ApiError(409, f"modo {modes[0]} da rotina desconhecido; rode pelo app Xiaomi Home")
++        self.gw.check_start()
++        mode = modes[0] if modes else None
++        if mode is not None and self.gw.cache.get("2/4") != mode:
++            res = self.gw.set("2/4", mode)
++            if not isinstance(res, dict) or res.get("code") != 0:
++                raise ApiError(502, f"não consegui ajustar o modo da rotina (2/4 = {mode}): {res}")
++        return {"fallback": "clean_rooms", "mode": mode, **self.gw.clean_rooms(routine["room_ids"])}
+ 
+     def action(self, name, **_):
+         if name not in catalog.SIMPLE_ACTIONS:
+diff --git a/tests/test_web.py b/tests/test_web.py
+index eb10800..301e224 100644
+--- a/tests/test_web.py
++++ b/tests/test_web.py
+@@ -186,6 +186,44 @@ class WebTests(unittest.TestCase):
+         self.assertEqual(self.fake.calls[-1][1]["in"], [{"piid": 15, "value": "3,8"}])
+         self.assertEqual(self.call("POST", "/api/clean/rooms", {"ids": []})[0], 400)
+ 
++    def _custom(self, cid):
++        self.fake.calls.clear()
++        st, res = self.call("POST", f"/api/clean/custom/{cid}")
++        return st, res, [(m, p) for m, p in self.fake.calls if m in ("set_properties", "action")]
++
++    def test_custom_applies_routine_mode(self):
++        old = self.gw.cache.get("2/42")
++        labels = [{"id": 11, "name": "Só aspirar", "mop": [1], "room_ids": [3, 8], "user_cfg": []},
++                  {"id": 12, "name": "Misturada", "mop": [1, 3], "room_ids": [3, 8], "user_cfg": []},
++                  {"id": 13, "name": "Sem modo", "mop": [], "room_ids": [3], "user_cfg": []}]
++        self.gw.cache.update({"2/42": json.dumps({"user_labels": labels}), "2/4": 3})
++        self.fake.values["2/4"] = 3
++        try:
++            # modo diferente: grava 2/4 ANTES de mandar limpar os cômodos
++            st, res, sent = self._custom(11)
++            self.assertEqual((st, res["mode"]), (200, 1))
++            self.assertEqual([m for m, _ in sent], ["set_properties", "action"])
++            self.assertEqual((sent[0][1][0]["siid"], sent[0][1][0]["piid"], sent[0][1][0]["value"]), (2, 4, 1))
++            self.assertEqual(sent[1][1]["in"], [{"piid": 15, "value": "3,8"}])
++            # já no modo certo: não grava de novo
++            st, _, sent = self._custom(11)
++            self.assertEqual((st, [m for m, _ in sent]), (200, ["action"]))
++            # modos diferentes por cômodo: recusa sem mexer em nada
++            st, res, sent = self._custom(12)
++            self.assertEqual((st, sent), (409, []))
++            self.assertIn("app Xiaomi Home", res["error"])
++            # sem modo na rotina: comportamento antigo
++            st, res, sent = self._custom(13)
++            self.assertEqual((st, res["mode"], [m for m, _ in sent]), (200, None, ["action"]))
++            # robô ocupado: não muda o modo
++            self.gw.cache.update({"2/4": 3, "2/2": 12})
++            self.fake.values["2/4"] = 3
++            st, _, sent = self._custom(11)
++            self.assertEqual((st, sent), (409, []))
++            self.assertEqual(self.gw.cache.get("2/4"), 3)
++        finally:
++            self.gw.cache.update({"2/42": old, "2/2": 2})
++
+     def test_actions_blocked(self):
+         self.gw.cache.update({"2/2": 12})
+         try:
+-- 
+2.53.0
+
