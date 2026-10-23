@@ -1,0 +1,249 @@
+From dd328ab75106260936a3d09c3efe0f10209c00c6 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Thu, 22 Oct 2026 23:11:08 -0300
+Subject: [PATCH] Nuvem: servidor fixo opcional (H50_CLOUD_COUNTRY)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Contas com aparelhos em servidores diferentes: o painel fica no primeiro
+servidor que tem algum aparelho (geralmente us) e não acha o robô que está em
+outro, então o mapa e o cadastro pela conta falham. Com H50_CLOUD_COUNTRY
+(us, de, sg, cn, ru, i2) todas as chamadas vão só para esse servidor.
+Vazio ou auto: nada muda.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/__main__.py  |  4 ++-
+ h50console/cloud.py     | 23 +++++++++----
+ h50console/config.py    |  8 ++++-
+ tests/test_transport.py | 73 +++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 99 insertions(+), 9 deletions(-)
+
+diff --git a/h50console/__main__.py b/h50console/__main__.py
+index 381e54a..7c466d5 100644
+--- a/h50console/__main__.py
++++ b/h50console/__main__.py
+@@ -33,7 +33,7 @@ def _passphrase(confirm: bool = False) -> str:
+ 
+ 
+ def _fleet(cfg: Config, start_threads: bool) -> Fleet:
+-    cloud = CloudService(cfg.data_dir / "cloud-session.json", cfg.data_dir / "map")
++    cloud = CloudService(cfg.data_dir / "cloud-session.json", cfg.data_dir / "map", country=cfg.cloud_country)
+     fleet = Fleet(cfg.data_dir, cloud, timeout=cfg.timeout, start_threads=start_threads)
+     fleet.load(seed=cfg.seed())
+     return fleet
+@@ -60,6 +60,8 @@ def serve(cfg: Config) -> int:
+     names = ", ".join(f"{r.cfg.name} ({r.cfg.transport})" for r in fleet.robots.values()) or "nenhum (cadastre na interface)"
+     log.info("H50 Console %s | dados em %s | robôs: %s", __version__, cfg.data_dir, names)
+     log.info("painel em http://%s:%s  (Ctrl+C para sair)", cfg.host, cfg.port)
++    if cfg.cloud_country:
++        log.info("nuvem Xiaomi: servidor fixo '%s' (H50_CLOUD_COUNTRY)", cfg.cloud_country)
+     if cfg.ingress:
+         log.info("modo Ingress (Home Assistant): pedidos do gateway %s entram sem senha%s", INGRESS_GATEWAY,
+                  "; acesso direto DESLIGADO" if cfg.ingress_only else "; acesso direto exige a senha")
+diff --git a/h50console/cloud.py b/h50console/cloud.py
+index e745719..99e2419 100644
+--- a/h50console/cloud.py
++++ b/h50console/cloud.py
+@@ -93,8 +93,9 @@ def _enc_signature(path: str, signed_nonce: str, params: dict) -> str:
+ # Sessão
+ # ---------------------------------------------------------------------------
+ class Cloud:
+-    def __init__(self, session: dict | None = None):
++    def __init__(self, session: dict | None = None, country: str = ""):
+         self.s = session or {}
++        self.forced_country = country   # H50_CLOUD_COUNTRY: usa só este servidor (vazio = descobre sozinho)
+         self.jar = http.cookiejar.CookieJar()
+         self.http = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+ 
+@@ -211,7 +212,7 @@ class Cloud:
+     # -- API ---------------------------------------------------------------------
+     def api(self, path: str, data: dict, country: str | None = None) -> dict:
+         """POST cifrado (RC4) em https://<país>.api.io.mi.com/app<path>. Devolve o JSON decifrado."""
+-        country = country or self.s.get("country", "us")
++        country = country or self.forced_country or self.s.get("country", "us")
+         host = "api.io.mi.com" if country == "cn" else f"{country}.api.io.mi.com"
+         url = f"https://{host}/app{path}"
+         nonce = _nonce()
+@@ -239,7 +240,7 @@ class Cloud:
+ 
+     def find_device(self, did: str) -> dict:
+         """Procura o robô nos servidores; grava o país encontrado na sessão."""
+-        for c in ([self.s["country"]] if self.s.get("country") else []) + COUNTRIES:
++        for c in self.countries():
+             try:
+                 res = self.api("/home/device_list", {"getVirtualModel": False, "getHuamiDevices": 0}, c)
+             except CloudError:
+@@ -248,7 +249,13 @@ class Cloud:
+                 if str(dev.get("did")) == str(did):
+                     self.s["country"] = c
+                     return dev
+-        raise CloudError(f"robô did={did} não encontrado em {COUNTRIES}")
++        raise CloudError(f"robô did={did} não encontrado em {self.countries()}")
++
++    def countries(self) -> list[str]:
++        """Servidores a consultar, em ordem: só o fixo, se houver; senão o da sessão e depois os demais."""
++        if self.forced_country:
++            return [self.forced_country]
++        return list(dict.fromkeys(([self.s["country"]] if self.s.get("country") else []) + COUNTRIES))
+ 
+     def map_url(self, obj_name: str) -> str:
+         """URL temporária do arquivo do mapa. Tenta a rota _pro (modelos novos) e a clássica."""
+@@ -272,9 +279,10 @@ class Cloud:
+ # Serviço para o app web: login por QR em segundo plano + download do mapa
+ # ---------------------------------------------------------------------------
+ class CloudService:
+-    def __init__(self, session_file: Path = SESSION_FILE, map_dir: Path = Path("data/map")):
++    def __init__(self, session_file: Path = SESSION_FILE, map_dir: Path = Path("data/map"), country: str = ""):
+         self.session_file = session_file
+         self.map_dir = map_dir
++        self.country = country                   # H50_CLOUD_COUNTRY (vazio = descobre o servidor sozinho)
+         self.lock = threading.Lock()
+         self.state = "ok" if session_file.exists() else "none"   # none | waiting | ok | error
+         self.error: str | None = None
+@@ -287,6 +295,7 @@ class CloudService:
+     def _cloud(self) -> "Cloud":
+         if self._c is None:
+             self._c = Cloud.load(self.session_file)
++            self._c.forced_country = self.country
+         return self._c
+ 
+     def api(self, path: str, data: dict, did: str | None = None) -> dict:
+@@ -307,7 +316,7 @@ class CloudService:
+         """Lista CRUA (traz token, localização e IP público: nunca devolver ao navegador como está)."""
+         with self._api_lock:
+             c = self._cloud()
+-            for country in dict.fromkeys(([c.s["country"]] if c.s.get("country") else []) + COUNTRIES):
++            for country in c.countries():
+                 try:
+                     res = c.api("/home/device_list", {"getVirtualModel": False, "getHuamiDevices": 0}, country)
+                 except CloudError:
+@@ -344,7 +353,7 @@ class CloudService:
+                 "login_url": (self.qr or {}).get("login_url")}
+         if self.session_file.exists():
+             s = json.loads(self.session_file.read_text(encoding="utf-8"))
+-            info.update({"user_id": s.get("user_id"), "country": s.get("country"), "login_at": s.get("login_at")})
++            info.update({"user_id": s.get("user_id"), "country": self.country or s.get("country"), "login_at": s.get("login_at")})
+         return info
+ 
+     def start_qr(self, on_done=None) -> dict:
+diff --git a/h50console/config.py b/h50console/config.py
+index 1df8920..33839f9 100644
+--- a/h50console/config.py
++++ b/h50console/config.py
+@@ -45,6 +45,7 @@ class Config:
+     ingress: bool = False              # H50_INGRESS: app do Home Assistant; o gateway do Ingress conta como administrador
+     ingress_only: bool = False         # H50_INGRESS_ONLY: recusa quem não vem do Ingress (nem do loopback)
+     log_level: str = "INFO"            # H50_LOG_LEVEL: DEBUG, INFO, WARNING ou ERROR
++    cloud_country: str = ""            # H50_CLOUD_COUNTRY: servidor da nuvem Xiaomi (us, de, sg...); vazio/auto = descobre
+     # migração de instalações de um robô só (usados apenas se não houver robots.json)
+     ip: str = ""
+     token: str = ""
+@@ -57,6 +58,11 @@ class Config:
+         token = e.get("H50_TOKEN", "")
+         if token and len(token) != 32:
+             raise SystemExit("H50_TOKEN deve ter 32 caracteres hexadecimais")
++        from .cloud import COUNTRIES
++        country = e.get("H50_CLOUD_COUNTRY", "").strip().lower()
++        country = "" if country == "auto" else country
++        if country and country not in COUNTRIES:
++            raise SystemExit(f"H50_CLOUD_COUNTRY deve ser auto ou um de: {', '.join(COUNTRIES)}")
+         return cls(
+             data_dir=Path(e.get("H50_DATA_DIR", "data")),
+             host=e.get("H50_HOST", cls.host),
+@@ -69,7 +75,7 @@ class Config:
+             viewer_password=e.get("H50_VIEWER_PASSWORD", ""), metrics_token=e.get("H50_METRICS_TOKEN", ""),
+             allowed_hosts=tuple(h.strip().lower() for h in e.get("H50_ALLOWED_HOSTS", "").split(",") if h.strip()),
+             ingress=_bool(e.get("H50_INGRESS")), ingress_only=_bool(e.get("H50_INGRESS_ONLY")),
+-            log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO",
++            log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO", cloud_country=country,
+             ip=e.get("H50_IP", ""), token=token, device_name=e.get("H50_NAME", ""),
+         )
+ 
+diff --git a/tests/test_transport.py b/tests/test_transport.py
+index 8846d34..94164fa 100644
+--- a/tests/test_transport.py
++++ b/tests/test_transport.py
+@@ -160,5 +160,78 @@ class SessionFile(unittest.TestCase):
+                 self.assertEqual(stat.S_IMODE(f.stat().st_mode), 0o600)
+ 
+ 
++class CloudCountry(unittest.TestCase):
++    """H50_CLOUD_COUNTRY: servidor da nuvem fixo, para contas com aparelhos em servidores diferentes."""
++
++    def _service(self, d, session_country, forced):
++        import json
++        from pathlib import Path
++        from h50console.cloud import CloudService
++        f = Path(d) / "cloud-session.json"
++        f.write_text(json.dumps({"user_id": "1", "ssecurity": "eA==", "service_token": "t",
++                                 "country": session_country}), encoding="utf-8")
++        return CloudService(f, Path(d) / "map", country=forced)
++
++    def _fake_api(self, lists):
++        asked = []
++
++        def api(cloud, path, data, country=None):
++            asked.append(country or cloud.forced_country or cloud.s.get("country"))
++            return {"result": {"list": lists.get(asked[-1], [])}}
++        return asked, api
++
++    def test_forced_country_is_the_only_server_used(self):
++        import tempfile
++        from unittest import mock
++        from h50console.cloud import Cloud
++        asked, api = self._fake_api({"us": [{"did": "1", "token": "a"}], "de": [{"did": "42", "token": "b"}]})
++        with tempfile.TemporaryDirectory() as d, mock.patch.object(Cloud, "api", api):
++            svc = self._service(d, "us", "de")
++            self.assertEqual([x["did"] for x in svc.devices()], ["42"])
++            self.assertEqual(svc.credentials("42")["token"], "b")
++            self.assertEqual(set(asked), {"de"})
++            self.assertEqual(svc.status()["country"], "de")
++            self.assertEqual(svc._cloud().find_device("42")["did"], "42")
++            with self.assertRaises(Exception):
++                svc._cloud().find_device("1")        # está no "us", mas o servidor fixo é o "de"
++
++    def test_without_forced_country_nothing_changes(self):
++        import tempfile
++        from unittest import mock
++        from h50console.cloud import COUNTRIES, Cloud
++        asked, api = self._fake_api({"de": [{"did": "42"}]})
++        with tempfile.TemporaryDirectory() as d, mock.patch.object(Cloud, "api", api):
++            svc = self._service(d, "sg", "")
++            self.assertEqual(svc._cloud().countries(), ["sg"] + [c for c in COUNTRIES if c != "sg"])
++            self.assertEqual([x["did"] for x in svc.devices()], ["42"])
++            self.assertEqual(asked[:2], ["sg", "us"])
++            self.assertEqual(svc.status()["country"], "de")   # o primeiro servidor com aparelhos fica gravado
++
++    def test_api_host_follows_the_forced_country(self):
++        from unittest import mock
++        from h50console.cloud import Cloud, CloudError
++        urls = []
++
++        def req(self, url, **_):
++            urls.append(url)
++            raise CloudError("fim")
++        c = Cloud({"user_id": "1", "ssecurity": "eA==", "service_token": "t", "country": "us"}, country="de")
++        with mock.patch.object(Cloud, "_req", req):
++            for country in (None, "sg"):
++                with self.assertRaises(CloudError):
++                    c.api("/home/device_list", {}, country)
++        self.assertEqual([u.split("/")[2] for u in urls], ["de.api.io.mi.com", "sg.api.io.mi.com"])
++
++    def test_config_reads_and_validates_the_country(self):
++        import os
++        from unittest import mock
++        from h50console.config import Config
++        for value, expected in (("", ""), ("auto", ""), (" DE ", "de"), ("i2", "i2")):
++            with mock.patch.dict(os.environ, {"H50_CLOUD_COUNTRY": value}):
++                self.assertEqual(Config.from_env("/nao/existe/.env").cloud_country, expected)
++        with mock.patch.dict(os.environ, {"H50_CLOUD_COUNTRY": "br"}), self.assertRaises(SystemExit):
++            Config.from_env("/nao/existe/.env")
++
++
+ if __name__ == "__main__":
+     unittest.main()
+-- 
+2.53.0
+
