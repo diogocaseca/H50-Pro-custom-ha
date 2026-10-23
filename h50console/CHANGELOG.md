@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.5
+
+- Correção: ao executar uma rotina pelo painel (▶ no Início) ou pelo MQTT (`custom`), o robô usava o **modo de
+  limpeza atual** em vez do modo da rotina. Uma rotina "só aspirar" podia sair com pano e voltar à base para lavar
+  os mops. Agora o modo da rotina é ajustado antes de limpar (patch 0007).
+- Rotina com modos diferentes por cômodo (aspira uns, passa pano em outros) é recusada com uma mensagem: rode-a pelo
+  app Xiaomi Home.
+
 ## 0.3.4
 
 - MQTT: sai o sensor **Detergente** (o H50 Pro não tem reservatório de detergente). A entidade é removida do HA na

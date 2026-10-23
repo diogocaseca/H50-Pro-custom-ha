@@ -96,6 +96,17 @@ Se não souber o login, abra o painel e veja o **Registro** do app: aparece
 `Ingress: usuário 'joao' do Home Assistant entrou como operador`. Na aba **Configurações** do painel o mesmo aviso mostra o
 usuário com que você entrou.
 
+## Rotinas personalizadas
+
+As rotinas criadas no app Xiaomi Home aparecem no **Início** (▶). O painel ainda não sabe disparar a rotina do jeito
+do app; ele limpa os **cômodos da rotina** e, antes, ajusta o **Modo de limpeza** para o da rotina (só aspirar,
+aspirar e esfregar...). Por isso:
+
+- depois da rotina, o Modo de limpeza fica como a rotina deixou;
+- sucção, água, passadas e caminho são os atuais (a rotina não informa esses ajustes ao robô);
+- rotina com modos diferentes por cômodo (ex.: aspira a sala e passa pano na cozinha) e rotina por zonas, sem
+  cômodos, não rodam pelo painel: use o app Xiaomi Home.
+
 ## Integração MQTT (robô como dispositivo do HA)
 
 Com a opção `mqtt` ligada, cada robô cadastrado no painel vira um **dispositivo** no Home Assistant (MQTT discovery):
@@ -211,6 +222,7 @@ A aba **Manutenção** do painel também gera backups criptografados próprios.
 | O robô não aparece na busca | Robô e HA em redes/VLANs diferentes, ou broadcast bloqueado. Informe o IP no cadastro e reserve o IP no roteador |
 | "Sem resposta do robô" | O IP mudou? **Robôs → Achar pelo DID**. Confira se o transporte é "Só rede local" e se o robô está ligado |
 | O mapa não aparece | A conta Xiaomi precisa estar conectada (**Robôs**). O mapa vem da nuvem; os comandos não. Se o robô está em outro servidor da Xiaomi, ajuste `cloud_region` |
+| Rotina "só aspirar" saiu com pano (até 0.3.4) | Atualize o app: desde a 0.3.5 o modo da rotina é ajustado antes de limpar |
 | "acesso direto desligado" | Você abriu `http://<ip>:8050`. Use o painel pela barra lateral, ou ligue `direct_access` |
 
 ## De onde vem o código
