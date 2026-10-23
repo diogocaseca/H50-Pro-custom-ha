@@ -211,6 +211,28 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("homeassistant/device/h50console_123456/config", [t for t, _, _ in self.out[n:]])
 
 
+class BrokerChoice(unittest.TestCase):
+    SERVICE = {"host": "core-mosquitto", "port": 1883, "ssl": False, "username": "addons", "password": "s"}
+
+    def test_supervisor_host_not_resolvable_falls_back_to_localhost(self):
+        b = mb.choose_broker({"port": 1883}, self.SERVICE, can_resolve=lambda h: False)
+        self.assertEqual((b["host"], b["port"], b["username"], b["password"], b["source"]),
+                         ("127.0.0.1", 1883, "addons", "s", "Supervisor"))
+        b = mb.choose_broker({"port": 1883}, self.SERVICE, can_resolve=lambda h: True)
+        self.assertEqual(b["host"], "core-mosquitto")
+
+    def test_options_win_over_the_supervisor(self):
+        b = mb.choose_broker({"port": 1884, "username": "robo", "password": "x"}, self.SERVICE, can_resolve=lambda h: False)
+        self.assertEqual((b["host"], b["port"], b["username"], b["password"], b["source"]),
+                         ("127.0.0.1", 1884, "robo", "x", "opções do app"))
+        b = mb.choose_broker({"host": "10.0.0.5", "port": 1883, "username": "u", "password": "p"}, None)
+        self.assertEqual((b["host"], b["username"], b["ssl"]), ("10.0.0.5", "u", False))
+
+    def test_nothing_configured(self):
+        b = mb.choose_broker({}, None)
+        self.assertEqual((b["host"], b["port"], b["username"], b["source"]), ("127.0.0.1", 1883, "", "nenhuma"))
+
+
 class PanelIntegration(unittest.TestCase):
     """PanelApi contra o servidor real do painel, com H50_API_TOKEN (patch 0005)."""
 

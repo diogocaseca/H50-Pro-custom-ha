@@ -88,8 +88,10 @@ def _bridge():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
         import mqtt_bridge
+        manual = {"host": str(opts.get("mqtt_host") or "").strip(), "port": int(opts.get("mqtt_port") or 1883),
+                  "username": str(opts.get("mqtt_user") or "").strip(), "password": str(opts.get("mqtt_password") or "")}
         mqtt_bridge.run_bridge(PORT, token, str(opts.get("mqtt_discovery_prefix") or "homeassistant"), Path("/data"),
-                               stop, os.environ.get("H50_APP_VERSION", ""))
+                               stop, os.environ.get("H50_APP_VERSION", ""), manual)
     except Exception:  # noqa: BLE001  (a ponte nunca derruba o painel)
         log.exception("a ponte MQTT parou por um erro; o painel continua funcionando")
 

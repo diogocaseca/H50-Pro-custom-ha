@@ -511,7 +511,10 @@ class Bridge:
             self.stop.wait(self.DEBOUNCE)
 
 
-# -- broker (Supervisor) e cliente MQTT ----------------------------------------------------------------------------
+# -- broker (Supervisor ou opções do app) e cliente MQTT --------------------------------------------------------------
+LOCAL_BROKER = "127.0.0.1"     # o app Mosquitto publica a 1883 no host; com host_network o app enxerga por aqui
+
+
 def supervisor_mqtt() -> dict | None:
     """Dados do broker MQTT do HA (app Mosquitto), pela API do Supervisor (config.yaml: services mqtt:want)."""
     token = os.environ.get("SUPERVISOR_TOKEN", "").strip()
@@ -527,6 +530,33 @@ def supervisor_mqtt() -> dict | None:
     return data if data.get("host") else None
 
 
+def resolvable(host: str) -> bool:
+    import socket
+    try:
+        socket.getaddrinfo(host, None)
+        return True
+    except OSError:
+        return False
+
+
+def choose_broker(manual: dict, service: dict | None, can_resolve=resolvable) -> dict:
+    """Broker a usar. `manual` = opções do app (mqtt_host, mqtt_port, mqtt_user, mqtt_password; vazio = automático);
+    `service` = o que o Supervisor informa sobre o app Mosquitto (ou None).
+
+    Usuário e senha das opções têm prioridade sobre os do Supervisor. O host do Supervisor é o nome do container do
+    Mosquitto (core-mosquitto), que um app com rede do host não resolve: nesse caso vale 127.0.0.1."""
+    service = service or {}
+    b = {"host": manual.get("host") or service.get("host") or "", "port": int(manual.get("port") or 1883),
+         "username": service.get("username") or "", "password": service.get("password") or "",
+         "ssl": bool(service.get("ssl")) and not manual.get("host"),
+         "source": "opções do app" if manual.get("username") else ("Supervisor" if service else "nenhuma")}
+    if manual.get("username"):
+        b["username"], b["password"] = manual["username"], manual.get("password") or ""
+    if not manual.get("host") and (not b["host"] or not can_resolve(b["host"])):
+        b["host"], b["ssl"] = LOCAL_BROKER, False
+    return b
+
+
 def wait_panel(api: PanelApi, stop: threading.Event, timeout: float = 120.0) -> bool:
     end = time.monotonic() + timeout
     while not stop.is_set() and time.monotonic() < end:
@@ -538,30 +568,34 @@ def wait_panel(api: PanelApi, stop: threading.Event, timeout: float = 120.0) -> 
     return False
 
 
-def run_bridge(port: int, token: str, prefix: str, data_dir: Path, stop: threading.Event, version: str = "") -> None:
+def run_bridge(port: int, token: str, prefix: str, data_dir: Path, stop: threading.Event, version: str = "",
+               manual: dict | None = None) -> None:
     """Liga a ponte e fica nela até `stop`. Falhas de broker ou painel só geram log e novas tentativas."""
     import paho.mqtt.client as mqtt
 
+    manual = manual or {}
     api = PanelApi(port, token)
     if not wait_panel(api, stop):
         log.error("ponte MQTT: o painel não respondeu em 127.0.0.1:%s; ponte desligada", port)
         return
-    broker = None
-    delay = 10.0
-    while not stop.is_set() and broker is None:
-        broker = supervisor_mqtt()
-        if broker is None:
-            log.warning("ponte MQTT: nenhum broker encontrado (instale o app Mosquitto broker); nova tentativa em %.0f s",
-                        delay)
-            stop.wait(delay)
-            delay = min(delay * 2, 600.0)
+    service = None
+    for _ in range(1 if manual.get("username") else 3):        # o Mosquitto pode ainda estar subindo
+        service = supervisor_mqtt()
+        if service or stop.wait(10):
+            break
     if stop.is_set():
         return
+    broker = choose_broker(manual, service)
+    log.info("ponte MQTT: broker %s:%s, usuário %s (credenciais: %s)", broker["host"], broker["port"],
+             repr(broker["username"]) if broker["username"] else "nenhum", broker["source"])
+    if not broker["username"]:
+        log.warning("ponte MQTT: sem usuário do broker. O app Mosquitto recusa conexões anônimas: preencha mqtt_user e "
+                    "mqtt_password (um usuário do HA ou um login do Mosquitto)")
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"h50console-{os.getpid()}")
-    if broker.get("username"):
-        client.username_pw_set(broker["username"], broker.get("password") or None)
-    if broker.get("ssl"):
+    if broker["username"]:
+        client.username_pw_set(broker["username"], broker["password"] or None)
+    if broker["ssl"]:
         client.tls_set()
     client.will_set(BRIDGE_STATUS, "offline", qos=1, retain=True)
     client.reconnect_delay_set(1, 60)
@@ -574,8 +608,13 @@ def run_bridge(port: int, token: str, prefix: str, data_dir: Path, stop: threadi
 
     def on_connect(c, _userdata, _flags, reason, _props=None):
         if reason.is_failure:
-            log.warning("ponte MQTT: broker recusou a conexão: %s", reason)
+            failures["n"] += 1
+            if failures["n"] in (1, 5) or failures["n"] % 30 == 0:     # sem inundar o log
+                text = str(reason).lower()
+                hint = " (confira mqtt_user e mqtt_password)" if "authori" in text or "password" in text else ""
+                log.warning("ponte MQTT: broker recusou a conexão: %s%s (tentativa %d)", reason, hint, failures["n"])
             return
+        failures["n"] = 0
         log.info("ponte MQTT conectada a %s:%s (descoberta em %s/device/...)", broker["host"], broker.get("port"), prefix)
         c.subscribe([(f"{BASE}/+/cmd/#", 1), (f"{bridge.prefix}/status", 1)])
         try:
@@ -583,9 +622,17 @@ def run_bridge(port: int, token: str, prefix: str, data_dir: Path, stop: threadi
         except (ApiError, OSError) as ex:
             log.warning("ponte MQTT: painel indisponível ao anunciar: %s", ex)
 
+    failures = {"n": 0}
+
+    def on_connect_fail(_c, _userdata):
+        failures["n"] += 1
+        if failures["n"] in (1, 5) or failures["n"] % 30 == 0:     # sem inundar o log
+            log.warning("ponte MQTT: não consegui conectar a %s:%s (tentativa %d); confira host e porta do broker",
+                        broker["host"], broker["port"], failures["n"])
+
     def on_disconnect(_c, _userdata, _flags, reason, _props=None):
-        bridge.connected = False
-        if not stop.is_set():
+        was_connected, bridge.connected = bridge.connected, False
+        if was_connected and not stop.is_set():
             log.warning("ponte MQTT desconectada (%s); reconectando…", reason)
 
     def on_message(_c, _userdata, msg):
@@ -593,7 +640,8 @@ def run_bridge(port: int, token: str, prefix: str, data_dir: Path, stop: threadi
                          daemon=True).start()       # comandos podem demorar (fila do robô); não segura o paho
 
     client.on_connect, client.on_disconnect, client.on_message = on_connect, on_disconnect, on_message
-    client.connect_async(broker["host"], int(broker.get("port") or 1883), keepalive=60)
+    client.on_connect_fail = on_connect_fail
+    client.connect_async(broker["host"], broker["port"], keepalive=60)
     client.loop_start()
     try:
         bridge.run()

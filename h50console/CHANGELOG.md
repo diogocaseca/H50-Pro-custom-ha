@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- MQTT: opções `mqtt_user`, `mqtt_password`, `mqtt_port` (padrão 1883) e `mqtt_host` (vazio = Mosquitto do HA).
+- Correção: com a rede do host, o app não resolve o nome `core-mosquitto` que o Supervisor informa; agora usa
+  `127.0.0.1` nesse caso. Falhas de conexão com o broker (host, porta, usuário/senha) passam a aparecer no Registro.
+
 ## 0.3.0
 
 - O painel aparece para **todos** os usuários do Home Assistant (`panel_admin: false`), com perfil pelo usuário do HA:

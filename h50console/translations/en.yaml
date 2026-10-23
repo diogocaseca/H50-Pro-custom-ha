@@ -27,6 +27,19 @@ configuration:
     description: >-
       Adds the robot as a Home Assistant device (vacuum, battery, consumables, dock buttons) through the Mosquitto
       broker app. Fully local: commands go through the panel and reach the robot over the LAN.
+  mqtt_host:
+    name: MQTT broker address
+    description: Leave empty to use the Home Assistant Mosquitto broker app. Fill in only for an external broker.
+  mqtt_port:
+    name: MQTT broker port
+    description: Default 1883 (the Mosquitto broker app port).
+  mqtt_user:
+    name: MQTT username
+    description: >-
+      Broker user: a Home Assistant user or a login set in the Mosquitto app. Empty: the app tries the user provided by
+      the Supervisor.
+  mqtt_password:
+    name: MQTT password
   mqtt_discovery_prefix:
     name: MQTT discovery prefix
     description: Only change it if you changed the prefix in the Home Assistant MQTT integration (default homeassistant).

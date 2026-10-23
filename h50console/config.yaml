@@ -1,6 +1,6 @@
 # App do Home Assistant (antigo "add-on"). Documentação: DOCS.md
 name: H50 Console
-version: "0.3.0"
+version: "0.3.1"
 slug: h50console
 description: Painel local para aspiradores Xiaomi H50 Pro (controle pela rede local; nuvem só para o mapa)
 url: https://github.com/diogocaseca/H50-Pro-custom-ha
@@ -36,6 +36,7 @@ options:
   admins: []
   others: operator
   mqtt: false
+  mqtt_port: 1883
   mqtt_discovery_prefix: homeassistant
   log_level: info
 schema:
@@ -47,5 +48,9 @@ schema:
     - str
   others: list(operator|viewer)
   mqtt: bool
+  mqtt_host: str?
+  mqtt_port: port
+  mqtt_user: str?
+  mqtt_password: password?
   mqtt_discovery_prefix: match(^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$)
   log_level: list(debug|info|warning|error)

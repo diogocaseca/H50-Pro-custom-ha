@@ -47,6 +47,9 @@ histórico de limpezas.
 | `admins` | vazio | Logins de usuários do HA que entram como **administrador** no painel, além dos administradores do HA. Veja [Quem pode fazer o quê](#quem-pode-fazer-o-quê) |
 | `others` | `operator` | Perfil dos demais usuários do HA: `operator` (comanda o robô sem mexer em configurações) ou `viewer` (só consulta) |
 | `mqtt` | desligado | Integração MQTT: cria o robô como dispositivo do HA. Veja [Integração MQTT](#integração-mqtt-robô-como-dispositivo-do-ha) |
+| `mqtt_host` | vazio | Endereço do broker. Vazio = app Mosquitto broker do HA. Só para broker externo |
+| `mqtt_port` | `1883` | Porta do broker |
+| `mqtt_user` / `mqtt_password` | vazio | Usuário e senha do broker. Vazio = o app tenta o usuário que o Supervisor fornece |
 | `mqtt_discovery_prefix` | `homeassistant` | Prefixo do MQTT discovery. Só mude se alterou na integração MQTT do HA |
 | `log_level` | `info` | `debug`, `info`, `warning` ou `error` |
 
@@ -98,8 +101,13 @@ usuário com que você entrou.
 Com a opção `mqtt` ligada, cada robô cadastrado no painel vira um **dispositivo** no Home Assistant (MQTT discovery):
 dá para usar o card de aspirador, ver bateria e consumíveis em qualquer dashboard e criar automações.
 
-**Requisitos:** o app **Mosquitto broker** instalado e a integração **MQTT** configurada no HA. O app pega usuário e
-senha do broker sozinho (pelo Supervisor); não há nada para preencher.
+**Requisitos:** o app **Mosquitto broker** instalado e a integração **MQTT** configurada no HA.
+
+**Usuário e senha do broker:** preencha `mqtt_user` e `mqtt_password` com um usuário do Home Assistant (o Mosquitto do HA
+aceita os usuários do HA; vale criar um só para isso, sem acesso de administrador) ou com um login configurado nas
+opções do app Mosquitto. Em branco, o app tenta o usuário que o Supervisor fornece aos apps. `mqtt_port` já vem com a
+porta padrão (1883). `mqtt_host` fica em branco para o Mosquitto do HA: o app usa a rede do host e chega ao broker por
+`127.0.0.1`.
 
 **Como ligar:** aba **Configuração** do app → **Integração MQTT** → ligar → **Salvar** → reiniciar o app. O robô aparece
 em **Configurações → Dispositivos e serviços → MQTT**.
@@ -172,8 +180,9 @@ Os nomes das entidades dependem do nome do robô no painel; confira em **Configu
 **Atenção:** comandos vindos do HA (automações, cards, voz) **não pedem a confirmação** que o painel pede antes de tirar o
 robô da base. Revise as automações que iniciam limpeza.
 
-Se o app não achar o broker, o **Registro** mostra "nenhum broker encontrado" e a ponte tenta de novo sozinha; o painel
-continua funcionando normalmente. Ao remover um robô no painel, o dispositivo sai do HA.
+O **Registro** do app mostra o broker e o usuário em uso (`ponte MQTT: broker 127.0.0.1:1883, usuário ...`) e, se der
+errado, o motivo: "não consegui conectar" (host ou porta) ou "broker recusou a conexão: Not authorized" (usuário ou
+senha). A ponte tenta de novo sozinha, e o painel continua funcionando normalmente. Ao remover um robô no painel, o dispositivo sai do HA.
 
 ## Segurança
 

@@ -27,6 +27,20 @@ configuration:
     description: >-
       Cria o robô como dispositivo no Home Assistant (aspirador, bateria, consumíveis, botões da base) pelo app
       Mosquitto broker. Tudo local: os comandos passam pelo painel e vão ao robô pela rede local.
+  mqtt_host:
+    name: Endereço do broker MQTT
+    description: >-
+      Deixe em branco para usar o app Mosquitto broker do Home Assistant. Preencha só para um broker externo.
+  mqtt_port:
+    name: Porta do broker MQTT
+    description: Padrão 1883 (a do app Mosquitto broker).
+  mqtt_user:
+    name: Usuário do MQTT
+    description: >-
+      Usuário do broker: um usuário do Home Assistant ou um login configurado no app Mosquitto. Em branco, o app tenta
+      o usuário que o Supervisor fornece.
+  mqtt_password:
+    name: Senha do MQTT
   mqtt_discovery_prefix:
     name: Prefixo do MQTT discovery
     description: Só mude se alterou o prefixo na integração MQTT do Home Assistant (padrão homeassistant).
