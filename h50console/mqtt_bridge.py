@@ -119,6 +119,7 @@ def attrs_payload(state: dict, cleaning: bool = False) -> dict:
         "area": None if area is None else round(area / 100, 2),                   # 2/6 vem em 0,01 m²
         "duration": _num(v.get("2/7")),
         "drying_progress": _num(v.get("2/88")),                                   # secagem dos mops (base)
+        "drying_left": _num(v.get("2/90")),                                       # minutos restantes da secagem
         "fault": None if fault is None else ("Nenhuma" if fault == 0 else str(fault)),
         "dirty_tank_full": bool(v.get("2/97")),
         "clean_tank_empty": bool(v.get("2/98")),
@@ -169,6 +170,9 @@ def discovery(robot: dict, version: str = "") -> tuple[str, dict]:
         "drying_progress": {"p": "sensor", "name": "Progresso da secagem", "uniq_id": f"{key}_drying_progress", **common,
                             "stat_t": t["attrs"], "val_tpl": attr("drying_progress"), "unit_of_meas": "%",
                             "stat_cla": "measurement", "ic": "mdi:fan-clock"},
+        "drying_left": {"p": "sensor", "name": "Secagem restante", "uniq_id": f"{key}_drying_left", **common,
+                        "stat_t": t["attrs"], "val_tpl": attr("drying_left"), "dev_cla": "duration",
+                        "unit_of_meas": "min", "ic": "mdi:timer-sand"},
         "fault": {"p": "sensor", "name": "Falha", "uniq_id": f"{key}_fault", **common, "stat_t": t["attrs"],
                   "val_tpl": attr("fault"), "ic": "mdi:alert-circle-outline"},
         "charging": {"p": "binary_sensor", "name": "Carregando", "uniq_id": f"{key}_charging", **common,

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.9
+
+- MQTT: sensor **Secagem restante** (minutos que faltam para terminar a secagem dos mops).
+
 ## 0.3.8
 
 - MQTT: sensor **Progresso da secagem** (% da secagem dos mops na base).

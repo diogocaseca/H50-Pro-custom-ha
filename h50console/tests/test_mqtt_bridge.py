@@ -11,7 +11,7 @@ from h50console import catalog
 
 ROBOT = {"id": "sala", "name": "Robô da sala", "model": "xiaomi.vacuum.ov42gl", "did": "123456"}
 STATE = {"health": {"online": True}, "status": 4, "status_label": "Limpando", "battery": 87,
-         "values": {"2/2": 4, "3/1": 87, "3/2": 2, "2/9": 3, "2/4": 3, "2/10": 2, "2/74": 1, "2/8": 2, "2/89": 40, "2/88": 35, "2/6": 1234, "2/7": 600,
+         "values": {"2/2": 4, "3/1": 87, "3/2": 2, "2/9": 3, "2/4": 3, "2/10": 2, "2/74": 1, "2/8": 2, "2/89": 40, "2/88": 35, "2/90": 95, "2/6": 1234, "2/7": 600,
                     "2/3": 0, "2/97": 1, "2/98": 0, "12/1": 90, "13/1": 80, "14/1": 70, "9/1": 60, "18/1": 50,
                     "19/1": None}}
 ROOMS = [{"id": 3, "name": "Sala", "last_clean": None}, {"id": 5, "name": "Cozinha", "last_clean": None}]
@@ -49,7 +49,7 @@ class Mapping(unittest.TestCase):
         self.assertEqual((a["clean_mode"], a["water_level"], a["suction"]), ("Aspirando e esfregando", "Nível 2", "Intenso"))
         self.assertEqual((a["clean_route"], a["clean_times"]), ("Rápido", "Duas vezes"))
         self.assertEqual(a["consumables"]["main_brush"], 90)
-        self.assertEqual(a["drying_progress"], 35)
+        self.assertEqual((a["drying_progress"], a["drying_left"]), (35, 95))
         self.assertIsNone(a["consumables"]["dust_bag"])
         idle = mb.attrs_payload({"status": 2, "values": {"2/89": -1, "3/2": 1, "2/3": 210013}})
         self.assertEqual((idle["progress"], idle["charging"], idle["fault"], idle["battery"]), (None, True, "210013", None))
@@ -90,6 +90,8 @@ class Mapping(unittest.TestCase):
         self.assertEqual(cmps["clean_mode"]["ops"][0], "Aspirando")
         d = cmps["drying_progress"]
         self.assertEqual((d["p"], d["unit_of_meas"], d["val_tpl"]), ("sensor", "%", "{{ value_json.drying_progress }}"))
+        d = cmps["drying_left"]
+        self.assertEqual((d["dev_cla"], d["unit_of_meas"], d["val_tpl"]), ("duration", "min", "{{ value_json.drying_left }}"))
         s = cmps["suction"]
         self.assertEqual((s["p"], s["ent_cat"], s["cmd_t"], s["ops"]),
                          ("select", "config", "h50console/sala/cmd/select/suction", ["Silencioso", "Padrão", "Intenso", "Turbo"]))
