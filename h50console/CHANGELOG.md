@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- **Limpeza por zona** (patch 0009): **Desenhar zona** no mapa do Início (até 10 retângulos por limpeza) e **zonas com
+  nome** no menu Área (só o administrador salva e apaga; o nome não pode repetir o de outra zona nem o de uma rotina).
+- Rotinas por zonas rodam pelo painel: as zonas são aprendidas quando a rotina roda pelo app Xiaomi Home. Rotina que o
+  painel não consegue rodar fica com o ▶ desabilitado e o motivo embaixo do nome.
+- MQTT: botões **Rotina: …** e **Zona: …** no dispositivo, e o comando `clean_zones` (`zone` ou `zones`).
+- Sai o cartão **Teste: limpeza por zona** (o comando foi confirmado no H50 Pro).
+
 ## 0.3.9
 
 - MQTT: sensor **Secagem restante** (minutos que faltam para terminar a secagem dos mops).

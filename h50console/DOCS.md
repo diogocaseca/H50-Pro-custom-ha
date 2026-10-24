@@ -77,11 +77,12 @@ O painel aparece na barra lateral de **todos** os usuários do Home Assistant. O
 | Perfil | Quem | O que pode |
 |---|---|---|
 | Administrador | Administradores do HA e os logins listados em `admins` | Tudo |
-| Operador (`others: operator`, padrão) | Os demais usuários do HA | Ver tudo o que o somente leitura vê; iniciar, pausar, continuar, parar, voltar à base, localizar, limpar cômodos e rotinas, o teste de limpeza por zona, as funções da base (esvaziar pó, lavar e secar o mop) e escolher os modos da limpeza no **Início** (modo, sucção, água, caminho, passadas, atalho) |
+| Operador (`others: operator`, padrão) | Os demais usuários do HA | Ver tudo o que o somente leitura vê; iniciar, pausar, continuar, parar, voltar à base, localizar, limpar cômodos, zonas (desenhadas na hora ou salvas) e rotinas, as funções da base (esvaziar pó, lavar e secar o mop) e escolher os modos da limpeza no **Início** (modo, sucção, água, caminho, passadas, atalho) |
 | Somente leitura (`others: viewer`) | Os demais usuários do HA | Só consultar |
 
 O operador **não** mexe na aba **Ajustes** nem nas configurações da estação, não cadastra nem remove robôs, não mexe na
-conta Xiaomi, em senhas, backups, notificações, edição do mapa, consumíveis (zerar) nem no laboratório.
+conta Xiaomi, em senhas, backups, notificações, edição do mapa, zonas salvas (salvar e apagar), consumíveis (zerar) nem
+no laboratório.
 
 **Como o painel sabe quem é admin:** o Supervisor informa o usuário do HA em cada pedido. As versões mais novas do
 Supervisor também informam o grupo (administrador ou não); nas mais antigas, só o login. Por isso existe a opção `admins`:
@@ -96,28 +97,34 @@ Se não souber o login, abra o painel e veja o **Registro** do app: aparece
 `Ingress: usuário 'joao' do Home Assistant entrou como operador`. Na aba **Configurações** do painel o mesmo aviso mostra o
 usuário com que você entrou.
 
+## Limpeza por zona
+
+No **Início**, toque em **Desenhar zona** (abaixo do mapa) e arraste no mapa para fazer um retângulo. Dá para desenhar
+até 10 zonas; cada uma aparece numerada, com o tamanho em metros, e o **✕** tira uma delas. Toque em **Concluir** e
+depois em **Iniciar limpeza**. A limpeza usa os **Modos** atuais. O mapa vem da nuvem, então desenhar zonas exige a
+conta Xiaomi conectada; a limpeza em si vai pela rede local.
+
+- Cada lado precisa ter ao menos 0,3 m. Abaixo de 0,7 m o painel avisa: o robô pode recusar zonas pequenas.
+- Zonas e cômodos não se misturam: escolher um cômodo desfaz as zonas e vice-versa.
+
+**Zonas com nome** (só o administrador salva e apaga): depois de desenhar, **Salvar zona** pede um nome. As zonas salvas
+aparecem no menu **Área**, junto dos cômodos, para todos que podem comandar o robô. O nome não pode repetir o de outra
+zona nem o de uma rotina do app Xiaomi Home. Para apagar, use o 🗑 no menu **Área**.
+
 ## Rotinas personalizadas
 
 As rotinas criadas no app Xiaomi Home aparecem no **Início** (▶). O painel ainda não sabe disparar a rotina do jeito
-do app; ele limpa os **cômodos da rotina** e, antes, ajusta o **Modo de limpeza** para o da rotina (só aspirar,
-aspirar e esfregar...). Por isso:
+do app; ele limpa os **cômodos** (ou as **zonas**) da rotina e, antes, ajusta o **Modo de limpeza** para o da rotina
+(só aspirar, aspirar e esfregar...). Por isso:
 
 - depois da rotina, o Modo de limpeza fica como a rotina deixou;
 - sucção, água, passadas e caminho são os atuais (a rotina não informa esses ajustes ao robô);
-- rotina com modos diferentes por cômodo (ex.: aspira a sala e passa pano na cozinha) e rotina por zonas, sem
-  cômodos, não rodam pelo painel: use o app Xiaomi Home.
-
-### Teste: limpeza por zona
-
-O comando de limpar zonas do H50 Pro ainda não foi confirmado. O cartão **Teste: limpeza por zona**, no Início, serve
-para descobrir:
-
-1. Rode uma limpeza por zona (ou uma rotina por zonas) pelo app Xiaomi Home. Enquanto ela roda, o robô informa as
-   zonas e o painel as guarda.
-2. Com o robô de volta na base, toque em ▶ na zona e confirme. Fique por perto para parar se precisar.
-3. O painel mostra a resposta do robô e acompanha o status por até 60 s. Se aparecer **FUNCIONOU**, o robô aceitou
-   a zona. Com **Voltar à base depois de confirmar** marcado, ele volta em seguida; desmarque para ver se ele limpa
-   o lugar certo.
+- **rotina por zonas:** a lista de rotinas não traz as zonas. O painel as aprende quando a rotina roda pelo app Xiaomi
+  Home (inclusive por agendamento do app), com o app H50 Console ligado. Até lá, o ▶ fica desabilitado com o aviso
+  "rode uma vez pelo app Xiaomi Home para o painel aprender as zonas". Se você mudar as zonas no app, o painel pega as
+  novas na próxima vez que a rotina rodar;
+- rotina com modos diferentes por cômodo (ex.: aspira a sala e passa pano na cozinha) não roda pelo painel: o ▶ fica
+  desabilitado e o motivo aparece embaixo do nome. Use o app Xiaomi Home.
 
 ## Integração MQTT (robô como dispositivo do HA)
 
@@ -151,6 +158,7 @@ comandos da aba **Diagnóstico**.
 | Escova principal, Escova lateral, Filtro, Mop, Saco de pó | Diagnóstico: vida útil em % |
 | Potência de sucção, Modo de limpeza, Nível de água do mop, Caminho, Tempos de limpeza | Seletores (configuração) |
 | Esvaziar o pó, Lavar o mop, Secar o mop, Parar a lavagem, Parar a secagem, Autolimpeza da base | Botões |
+| Rotina: …, Zona: … | Botões: um por rotina que o painel consegue rodar e um por zona salva. Aparecem, mudam e somem sozinhos (zonas na hora; rotinas criadas no app em até ~5 min) |
 
 Se o painel não conseguir falar com o robô, as entidades dele ficam **indisponíveis** (o painel leva até ~1 min para
 perceber, conforme o intervalo de leitura). Se o app parar, todas ficam indisponíveis.
@@ -170,6 +178,9 @@ data:
   params:
     rooms: [3, 5]
 ```
+
+Zonas: `clean_zones` com `zone` (nome de uma zona salva, ex.: `params: {zone: Frente do sofá}`) ou `zones` (retângulos
+`[x1, y1, x2, y2]` em mm, nas coordenadas do mapa).
 
 Outros comandos: `custom` com `id` (uma rotina do app Xiaomi Home, ex.: `params: {id: 2}`) ou uma ação simples
 (`sweep`, `mop`, `sweep-mop`, `sweep-then-mop`, `dust`, `wash-mop`, `dry`, `charge`...), sem `params`.
