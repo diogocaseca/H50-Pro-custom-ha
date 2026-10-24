@@ -1,0 +1,918 @@
+From 48804226abe5abd45986562556f1d6bc505c970b Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Sat, 24 Oct 2026 00:00:34 -0300
+Subject: [PATCH] Limpeza por zona: desenhar no mapa, zonas com nome e rotinas
+ por zonas
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A ação 2/37 (start-zone-sweep) foi confirmada no H50 Pro com o formato do
+patch anterior. Agora:
+
+- Início: "Desenhar zona" abaixo do mapa (arrastar faz um retângulo, até
+  10 por limpeza); o botão principal limpa as zonas com os modos atuais.
+- Zonas com nome (só o administrador salva e apaga): aparecem no menu
+  Área. O nome não pode repetir o de outra zona nem o de uma rotina.
+- Rotinas por zonas: o painel aprende as zonas de cada rotina quando ela
+  roda pelo app Xiaomi Home (o robô as informa no 2/40) e guarda a cópia
+  em app_setting (o prop_change tem retenção). Na primeira vez importa o
+  que já estiver no histórico. O ▶ ajusta o modo da rotina e limpa as
+  zonas. Rotina que o painel não consegue rodar fica com o ▶ desabilitado
+  e o motivo embaixo do nome.
+- O cartão de teste sai; a limpeza por zona segue as mesmas regras de
+  saída da base que as outras limpezas.
+
+API: GET/POST /api/zones, PUT/DELETE /api/zones/<id> (escrita só admin),
+POST /api/clean/zones com "zones" ou "zone_id" (operador também), e
+/api/custom passa a informar "runnable", "reason" e "zones". O evento
+"zones" avisa a tela e a ponte MQTT quando as zonas mudam.
+---
+ h50console/decoders.py       |  12 ---
+ h50console/poller.py         |   5 +-
+ h50console/static/app.js     | 165 +++++++++++++++++++++++------------
+ h50console/static/index.html |   8 +-
+ h50console/static/map.js     |  51 ++++++++++-
+ h50console/static/style.css  |   6 +-
+ h50console/web.py            | 107 ++++++++++++++---------
+ h50console/zones.py          | 132 ++++++++++++++++++++++++++++
+ tests/test_auth.py           |   7 +-
+ tests/test_stage1.py         |   7 --
+ tests/test_stage23.py        |   2 +
+ tests/test_web.py            |  72 ++++++++++-----
+ 12 files changed, 421 insertions(+), 153 deletions(-)
+ create mode 100644 h50console/zones.py
+
+diff --git a/h50console/decoders.py b/h50console/decoders.py
+index 7725ab5..a139c61 100644
+--- a/h50console/decoders.py
++++ b/h50console/decoders.py
+@@ -144,18 +144,6 @@ def zone_param(zones) -> str:
+     return json.dumps([{"blocks_region": zone_region(z), "blocks_attr": 0} for z in zones], separators=(",", ":"))
+ 
+ 
+-def captured_zones(raw) -> list[list] | None:
+-    """2/40 de uma limpeza por zona (ou rotina por zonas) -> as zonas, como o robô as informou; senão None."""
+-    d = parse_json(raw, {})
+-    if not isinstance(d, dict):
+-        return None
+-    zones = d.get("zones")
+-    if not zones:
+-        custom = running_custom(raw)
+-        zones = custom["zones"] if custom else None
+-    return [list(z) for z in zones] if isinstance(zones, list) and zones else None
+-
+-
+ def furnitures(raw) -> list[dict]:
+     """2/102 -> [{"id", "type", "rid"}]. Tipos (1220, 1400, 1740) e rid 248 ainda não mapeados."""
+     return [{"id": f.get("id"), "type": f.get("type"), "rid": f.get("rid")}
+diff --git a/h50console/poller.py b/h50console/poller.py
+index 9fe991c..4f42c61 100644
+--- a/h50console/poller.py
++++ b/h50console/poller.py
+@@ -21,7 +21,7 @@ import threading
+ import time
+ from datetime import datetime, timezone
+ 
+-from . import catalog, decoders
++from . import catalog, decoders, zones
+ from .gateway import Gateway
+ from .miio import MiioError
+ from .store import Store, iso as store_iso
+@@ -118,6 +118,9 @@ class Poller:
+         # nova limpeza saindo da base: começa a sessão do zero (antes de memorizar o que está nela)
+         if "2/2" in changes and changes["2/2"][1] in CLEANING and changes["2/2"][0] not in catalog.ACTIVE_STATUS:
+             self._session = {}
++        # rotina por zonas rodando (app Xiaomi Home): guarda as zonas dela para o painel poder rodá-la depois
++        if "2/40" in changes and zones.learn(self.store, changes["2/40"][1]):
++            self.gw.bus.publish("zones", {"learned": True})
+         # memoriza tipo, cômodos e rotina só enquanto LIMPA: na volta à base (6) o 2/5 já foi zerado
+         if cache.get("2/2") in CLEANING:
+             _absorb(self._session, cache.get("2/5"), cache.get("2/40"))
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index c43a358..bb99fbd 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -84,6 +84,7 @@
+   // ---- estado compartilhado --------------------------------------------------------------
+   let state = null, appInfo = null, settings = null, mapData = null, cloud = null, robots = [];
+   const areaSel = new Set();                       // cômodos escolhidos em "Área" (vazio = casa inteira)
++  let zoneSel = [], zoneId = null, drawing = false, savedZones = [];   // zonas [x1,y1,x2,y2] (mm); zoneId = zona salva
+   const V = (k) => state?.values?.[k];
+   const CLEANING = new Set([4, 10, 16, 17]), PAUSED = new Set([5, 18]), RETURNING = new Set([6, 19, 20, 21, 24]);
+   const BASE_MODE = { 0: "", 1: "Secando", 2: "Esvaziando o pó", 3: "Lavando o mop" };
+@@ -141,6 +142,7 @@
+   }
+ 
+   function areaText() {
++    if (zoneSel.length) return zoneId ? savedZones.find((z) => z.id === zoneId)?.name || "Zona salva" : `${zoneSel.length} zona(s) desenhada(s)`;
+     if (!areaSel.size) return "Casa inteira";
+     const names = Object.fromEntries((mapData?.rooms || roomsCache || []).map((r) => [r.id, r.name]));
+     return [...areaSel].map((id) => names[id] || id).join(", ");
+@@ -155,65 +157,23 @@
+     $("#sub-station").textContent = BASE_MODE[base.mode] || "Pronta";
+   }
+ 
+-  // teste da limpeza por zona (ação 2/37): formato ainda não confirmado no H50 Pro
+-  const ZONE_DOCKED = new Set([2, 9, 14]);
+-  let zoneTesting = false;
+-  async function renderZoneTest() {
+-    const list = await api("GET", "/api/zones/captured").catch(() => []);
+-    const docked = ZONE_DOCKED.has(state?.status);
+-    $("#zone-list").replaceChildren(...(list.length ? list.map((z) => {
+-      const btn = el("button", { className: "play", textContent: "▶", disabled: zoneTesting || !docked,
+-        title: docked ? "Testar: limpar esta zona" : "Só com o robô na base" });
+-      btn.onclick = () => confirmAction("O robô vai sair da base para limpar a zona. Fique por perto para parar se precisar.",
+-        () => zoneTest(z.zones));
+-      const sizes = z.sizes.map(([w, h]) => `${w} × ${h} m`).join(", ");
+-      return el("div", { className: "list-row" },
+-        el("div", {}, el("div", { textContent: z.routine ? `Rotina "${z.routine}"` : `${z.zones.length} zona(s)` }),
+-          el("div", { className: "muted small", textContent: `${fmtDate(z.ts)} · ${sizes}` })),
+-        btn);
+-    }) : [el("p", { className: "muted small", textContent: "Nenhuma zona ainda. Rode uma limpeza por zona (ou a rotina) pelo app Xiaomi Home." })]));
+-  }
+-
+-  async function zoneTest(zones) {
+-    const out = $("#zone-out"), goHome = $("#zone-home").checked;
+-    const log = (line) => { out.hidden = false; out.textContent += line + "\n"; };
+-    out.textContent = "";
+-    zoneTesting = true; renderZoneTest();
+-    try {
+-      const res = await api("POST", "/api/clean/zones", { zones });
+-      log(`resposta do robô: ${JSON.stringify(res)}`);
+-      if (res.code !== 0) { log("O robô recusou o formato. Nada foi iniciado."); return; }
+-      for (let i = 0; i < 20; i++) {
+-        await new Promise((r) => setTimeout(r, 3000));
+-        const st = await api("GET", "/api/state");
+-        const v = st.values || {};
+-        log(`${(i + 1) * 3} s: ${st.status_label} (${st.status}) · tipo 2/5 = ${v["2/5"]} · 2/40 = ${String(v["2/40"] ?? "").slice(0, 160)}`);
+-        if (v["2/5"] === 2 && String(v["2/40"]).includes("zones")) {
+-          log("FUNCIONOU: o robô aceitou e está limpando a zona (formato aceito).");
+-          if (goHome) { await api("POST", "/api/actions/home"); log("Mandei voltar à base."); }
+-          return;
+-        }
+-      }
+-      log("Em 60 s o robô não confirmou uma limpeza por zona. Confira onde ele está e, se precisar, mande voltar.");
+-    } catch (e) {
+-      log(`erro: ${e.message}`);
+-    } finally {
+-      zoneTesting = false; renderZoneTest();
+-    }
+-  }
+-
+   let roomsCache = null;
+   async function renderHomeLists() {
+-    const [custom, sched] = await Promise.all([api("GET", "/api/custom"), api("GET", "/api/schedules")]);
++    const [custom, sched, zones] = await Promise.all([api("GET", "/api/custom"), api("GET", "/api/schedules"),
++      api("GET", "/api/zones").catch(() => [])]);
++    savedZones = zones;
++    if (zoneId && !savedZones.some((z) => z.id === zoneId)) { zoneSel = []; zoneId = null; toggleRefresh(); }
+     $("#custom-list").replaceChildren(...(custom.length ? custom.map((c) => {
+-      const play = el("button", { className: "play", title: `Executar ${c.name}`, textContent: "▶" });
++      const play = el("button", { className: "play", title: c.runnable ? `Executar ${c.name}` : c.reason, textContent: "▶",
++        disabled: !c.runnable });
+       play.onclick = () => confirmAction(`Executar "${c.name}"? O robô vai sair da base.`,
+         () => run(c.name, () => api("POST", `/api/clean/custom/${c.id}`)));
++      const where = c.rooms.join(", ") || (c.zones ? `${c.zones.length} zona(s), aprendida(s) do app` : "zonas definidas no app");
+       return el("div", { className: "list-row" },
+-        el("div", {}, el("div", { textContent: c.name }), el("div", { className: "muted small", textContent: c.rooms.join(", ") || "zonas definidas no app" })),
++        el("div", {}, el("div", { textContent: c.name }), el("div", { className: "muted small", textContent: where }),
++          ...(c.runnable ? [] : [el("div", { className: "muted small", textContent: c.reason })])),
+         play);
+     }) : [el("p", { className: "muted small", textContent: "Nenhuma rotina. Crie no app Xiaomi Home." })]));
+-    renderZoneTest();
+     const on = sched.filter((s) => s.on).length;
+     $("#sub-sched").textContent = `${sched.length} limpeza(s) programada(s)${sched.length ? `, ${on} ativa(s)` : ""}`;
+     $("#btn-sched").onclick = () => openSheet("Limpeza programada", [
+@@ -256,12 +216,62 @@
+     const hover = $("#map-hover");
+     await MapView.render($("#home-map"), mapData, {
+       selected: areaSel,
+-      onRoomClick: toggleRoom,
+-      onHover: (e, name) => { hover.textContent = e && name ? `${name} · clique para escolher` : " "; },
++      zones: zoneSel,
++      onRoomClick: drawing ? undefined : toggleRoom,
++      onDraw: drawing ? addZone : undefined,
++      onHover: (e, name) => {
++        hover.textContent = drawing ? "Arraste no mapa para desenhar a zona" : e && name ? `${name} · clique para escolher` : " ";
++      },
+     });
++    renderZoneTools();
++  }
++
++  // ---- zonas: desenhar no mapa, salvar com nome (admin) e limpar ----------------------------------------------
++  const ZONE_MIN = 300, ZONE_WARN = 700, ZONE_MAX = 10;
++  function addZone(rect) {
++    const [x1, y1, x2, y2] = rect, w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
++    if (Math.min(w, h) < ZONE_MIN) return toast("Zona pequena demais: cada lado precisa ter ao menos 0,3 m.", true);
++    if (zoneId) { zoneSel = []; zoneId = null; }                // editar uma zona salva vira uma seleção nova
++    if (zoneSel.length >= ZONE_MAX) return toast(`No máximo ${ZONE_MAX} zonas por limpeza.`, true);
++    areaSel.clear();
++    zoneSel.push(rect);
++    if (Math.min(w, h) < ZONE_WARN) toast("Zona com menos de 0,7 m de lado: o robô pode recusar.");
++    toggleRefresh();
++  }
++
++  function renderZoneTools() {
++    const box = $("#zone-tools");
++    box.hidden = !mapData;
++    if (!mapData) return;
++    const draw = el("button", { className: drawing ? "primary" : "", textContent: drawing ? "Concluir" : "Desenhar zona" });
++    draw.onclick = () => { drawing = !drawing; drawMap(); };
++    const chips = zoneSel.map((z, i) => {
++      const x = el("button", { className: "chip on", title: "Tirar esta zona", textContent: `${i + 1} ✕` });
++      x.onclick = () => { zoneSel.splice(i, 1); zoneId = null; toggleRefresh(); };
++      return x;
++    });
++    const save = el("button", { id: "zone-save", textContent: "Salvar zona" });
++    save.onclick = saveZone;
++    box.replaceChildren(draw, ...chips, ...(zoneSel.length && !zoneId ? [save] : []));
++  }
++
++  function saveZone() {
++    const input = el("input", { type: "text", maxLength: 40, placeholder: "ex.: Frente do sofá" });
++    openSheet("Salvar zona", [
++      el("p", { className: "muted small", textContent: `${zoneSel.length} retângulo(s). O nome não pode ser igual ao de outra zona nem ao de uma rotina.` }),
++      input,
++    ], { confirm: async () => {
++      const z = await api("POST", "/api/zones", { name: input.value, zones: zoneSel });
++      savedZones = await api("GET", "/api/zones");
++      zoneId = z.id;
++      toast(`Zona "${z.name}" salva`);
++      toggleRefresh();
++    }, confirmLabel: "Salvar" });
++    setTimeout(() => input.focus(), 50);
+   }
+ 
+   function toggleRoom(id) {
++    zoneSel = []; zoneId = null;
+     areaSel.has(id) ? areaSel.delete(id) : areaSel.add(id);
+     renderSubs(); renderStartButtons();
+     if (mapData) drawMap(); else renderHomeMap();
+@@ -277,6 +287,10 @@
+     if (PAUSED.has(st)) return run("Continuar", () => api("POST", "/api/actions/resume"));
+     if (RETURNING.has(st)) return run("Parar", () => api("POST", "/api/actions/stop"));
+     const where = areaText();
++    if (zoneSel.length) {
++      return confirmAction(`Limpar ${where}? O robô vai sair da base.`,
++        () => run("Limpar zonas", () => api("POST", "/api/clean/zones", zoneId ? { zone_id: zoneId } : { zones: zoneSel })));
++    }
+     confirmAction(`Iniciar limpeza: ${where}? O robô vai sair da base.`, () => areaSel.size
+       ? run("Limpar cômodos", () => api("POST", "/api/clean/rooms", { ids: [...areaSel] }))
+       : run("Iniciar limpeza", () => api("POST", "/api/actions/start")));
+@@ -357,20 +371,54 @@
+   function openArea() {
+     const rooms = mapData?.rooms?.slice().sort((a, b) => a.id - b.id) || roomsCache || [];
+     const draft = new Set(areaSel);
+-    const all = el("button", { className: "choice" + (draft.size ? "" : " on"), textContent: "Casa inteira" });
++    let draftZone = zoneId, touched = false;
++    const all = el("button", { className: "choice" + (draft.size || zoneSel.length ? "" : " on"), textContent: "Casa inteira" });
+     const btns = rooms.map((r) => {
+       // ajustes por cômodo (vêm no mapa da nuvem; 0 = usa o ajuste geral). Só leitura por enquanto.
+       const own = [r.fan && `sucção ${r.fan}`, r.water && `água ${r.water}`, r.times && `${r.times}×`].filter(Boolean).join(", ");
+       const b = el("button", { className: "choice" + (draft.has(r.id) ? " on" : ""), textContent: own ? `${r.name} · ${own}` : r.name,
+         title: own ? "Este cômodo tem ajustes próprios (definidos no app Xiaomi Home)" : "Usa o ajuste geral" });
+-      b.onclick = () => { draft.has(r.id) ? draft.delete(r.id) : draft.add(r.id); b.classList.toggle("on"); all.classList.toggle("on", !draft.size); };
++      b.onclick = () => {
++        touched = true; draftZone = null; zbtns.forEach((z) => z.classList.remove("on"));
++        draft.has(r.id) ? draft.delete(r.id) : draft.add(r.id); b.classList.toggle("on"); all.classList.toggle("on", !draft.size);
++      };
+       return b;
+     });
+-    all.onclick = () => { draft.clear(); btns.forEach((b) => b.classList.remove("on")); all.classList.add("on"); };
++    const zbtns = savedZones.map((z) => {
++      const b = el("button", { className: "choice" + (draftZone === z.id ? " on" : ""), textContent: z.name });
++      b.onclick = () => {
++        touched = true; draftZone = z.id; draft.clear();
++        [all, ...btns, ...zbtns].forEach((x) => x.classList.toggle("on", x === b));
++      };
++      return b;
++    });
++    all.onclick = () => {
++      touched = true; draftZone = null; draft.clear();
++      [...btns, ...zbtns].forEach((b) => b.classList.remove("on")); all.classList.add("on");
++    };
++    const dels = savedZones.map((z) => {
++      const d = el("button", { className: "chip", title: `Apagar a zona ${z.name}`, textContent: `🗑 ${z.name}` });
++      d.onclick = () => run(`Apagar ${z.name}`, async () => {
++        await api("DELETE", `/api/zones/${z.id}`);
++        if (zoneId === z.id) { zoneSel = []; zoneId = null; }
++        savedZones = await api("GET", "/api/zones");
++        $("#sheet").close(); toggleRefresh();
++      });
++      return d;
++    });
+     openSheet("Área", [
+       el("div", { className: "choices" }, all, ...btns),
+       el("p", { className: "muted small", textContent: "Também dá para tocar nos cômodos do mapa." }),
+-    ], { confirm: () => { areaSel.clear(); draft.forEach((id) => areaSel.add(id)); toggleRefresh(); } });
++      ...(savedZones.length ? [el("div", { className: "card-label", textContent: "Zonas salvas" }), el("div", { className: "choices" }, ...zbtns),
++        el("div", { className: "chips zone-dels" }, ...dels)] : []),
++      el("p", { className: "muted small", textContent: "Para uma zona nova, use \"Desenhar zona\" abaixo do mapa." }),
++    ], { confirm: () => {
++      if (!touched) return;
++      areaSel.clear(); draft.forEach((id) => areaSel.add(id));
++      const z = savedZones.find((x) => x.id === draftZone);
++      zoneSel = z ? z.zones.map((r) => [...r]) : []; zoneId = z ? z.id : null;
++      toggleRefresh();
++    } });
+   }
+   const toggleRefresh = () => { renderSubs(); renderStartButtons(); mapData ? drawMap() : renderHomeMap(); };
+ 
+@@ -686,6 +734,7 @@
+     es.addEventListener("mapdata", async () => { mapData = await api("GET", "/api/map").catch(() => mapData); if (current() === "inicio" && mapData) drawMap(); });
+     for (const ev of ["online", "offline"]) es.addEventListener(ev, async () => { await loadState().catch(() => {}); renderHeader(); });
+     es.addEventListener("command", () => { if (current() === "diagnostico") refresh(); });
++    es.addEventListener("zones", () => { if (current() === "inicio") renderHomeLists(); });
+     es.addEventListener("cleaning", () => { if (["historico", "dashboards", "inicio"].includes(current())) refresh(); });
+     es.addEventListener("fault", () => { if (current() === "diagnostico") refresh(); });
+     es.addEventListener("map", () => {
+@@ -720,7 +769,7 @@
+     return robots;
+   }
+   function resetCaches() {
+-    state = null; settings = null; mapData = null; roomsCache = null; areaSel.clear();
++    state = null; settings = null; mapData = null; roomsCache = null; areaSel.clear(); zoneSel = []; zoneId = null; drawing = false;
+     for (const k of Object.keys(prevRaw)) delete prevRaw[k];
+   }
+   function setRobot(id) {
+diff --git a/h50console/static/index.html b/h50console/static/index.html
+index 9c42416..04848e2 100644
+--- a/h50console/static/index.html
++++ b/h50console/static/index.html
+@@ -45,6 +45,7 @@
+         <div class="chips" id="chips"></div>
+         <div id="home-map" data-maxh="0.62"></div>
+         <p id="map-hover" class="muted small center">&nbsp;</p>
++        <div class="bar center" id="zone-tools" hidden></div>
+         <div class="bar center"><button id="map-edit" hidden title="Monta um rascunho de móveis e paredes virtuais (não grava no robô)">Editar mapa (rascunho)</button></div>
+         <div id="cloud-connect" hidden>
+           <p class="muted">O mapa fica na nuvem Xiaomi. Conecte com o QR code: abra o <strong>Xiaomi Home</strong> no celular,
+@@ -76,13 +77,6 @@
+           <div class="card-label">Limpeza personalizada</div>
+           <div id="custom-list"></div>
+         </div>
+-        <div class="card" id="zone-test">
+-          <div class="card-label">Teste: limpeza por zona</div>
+-          <p class="muted small">Zonas das últimas limpezas por zona feitas pelo app Xiaomi Home. O teste manda o robô limpar a zona pela rede local; só com o robô na base.</p>
+-          <div id="zone-list"></div>
+-          <label class="small"><input type="checkbox" id="zone-home" checked> Voltar à base depois de confirmar</label>
+-          <pre id="zone-out" class="out small" hidden></pre>
+-        </div>
+         <button class="tile wide" id="btn-sched"><span class="tile-title">Limpeza programada</span><span class="tile-sub" id="sub-sched"></span><span class="chev">›</span></button>
+       </div>
+     </div>
+diff --git a/h50console/static/map.js b/h50console/static/map.js
+index 215d39b..f086f7c 100644
+--- a/h50console/static/map.js
++++ b/h50console/static/map.js
+@@ -20,7 +20,7 @@
+     return m.slice(0, 3);
+   }
+ 
+-  async function render(host, m, { onHover, onRoomClick, selected, heat, dim, onPoint, marks } = {}) {
++  async function render(host, m, { onHover, onRoomClick, selected, heat, dim, onPoint, marks, zones, onDraw } = {}) {
+     const grid = m._grid || (m._grid = await inflate(m.grid_zlib_b64));
+     const sel = selected && selected.size ? selected : null;   // com seleção, o resto fica apagado
+     const faint = dim && !sel;                                  // mapa de calor: cômodos quase apagados
+@@ -127,6 +127,19 @@
+       g.beginPath(); g.arc(X(x), Y(y), r, 0, 2 * Math.PI); g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent"); g.fill();
+     }
+ 
++    // zonas de limpeza (mm, [x1,y1,x2,y2]): retângulo na cor de destaque, numerado, com o tamanho em metros
++    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2f6fde";
++    const zoneRect = (ctx, [x1, y1, x2, y2], text) => {
++      const l = X(Math.min(x1, x2)), r = X(Math.max(x1, x2)), t = Y(Math.max(y1, y2)), b = Y(Math.min(y1, y2));
++      ctx.save();
++      ctx.fillStyle = accent; ctx.globalAlpha = 0.22; ctx.fillRect(l, t, r - l, b - t);
++      ctx.globalAlpha = 1; ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.strokeRect(l, t, r - l, b - t);
++      ctx.restore();
++      if (text) label(ctx, text, (l + r) / 2, (t + b) / 2, ink, dark, 11, true);
++    };
++    const size = ([x1, y1, x2, y2]) => `${(Math.abs(x2 - x1) / 1000).toFixed(1).replace(".", ",")} × ${(Math.abs(y2 - y1) / 1000).toFixed(1).replace(".", ",")} m`;
++    (zones || []).forEach((z, i) => zoneRect(g, z, `${i + 1} · ${size(z)}`));
++
+     // marcadores do editor (mm): círculo com cruz
+     for (const [x, y] of marks || []) {
+       g.beginPath(); g.arc(X(x), Y(y), 6, 0, 2 * Math.PI);
+@@ -175,7 +188,41 @@
+ 
+     const wrap = document.createElement("div");
+     wrap.className = "map-wrap";
+-    wrap.append(cv);
++    const holder = document.createElement("div");
++    holder.style.position = "relative";
++    holder.append(cv);
++    wrap.append(holder);
++
++    // desenhar zona: arrastar na tela (dedo ou mouse) faz um retângulo; ao soltar, devolve [x1,y1,x2,y2] em mm
++    if (onDraw) {
++      const over = document.createElement("canvas");
++      over.style.cssText = `position:absolute;left:0;top:0;width:${cv.style.width};height:${cv.style.height};pointer-events:none`;
++      over.width = cv.width; over.height = cv.height;
++      const og = over.getContext("2d");
++      og.scale(dpr, dpr);
++      holder.append(over);
++      cv.style.cursor = "crosshair";
++      const toMm = (px, py) => [Math.round(ox + (px / scale + c0 - 0.5) * res), Math.round(oy + (r1 + 0.5 - py / scale) * res)];
++      const at = (e) => { const b = cv.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
++      let start = null;
++      cv.addEventListener("pointerdown", (e) => { start = at(e); cv.setPointerCapture(e.pointerId); e.preventDefault(); });
++      cv.addEventListener("pointermove", (e) => {
++        if (!start) return;
++        const [px, py] = at(e);
++        og.clearRect(0, 0, cv.width, cv.height);
++        zoneRect(og, [...toMm(...start), ...toMm(px, py)], size([...toMm(...start), ...toMm(px, py)]));
++      });
++      const finish = (e) => {
++        if (!start) return;
++        const [px, py] = at(e), [sx, sy] = start;
++        start = null;
++        og.clearRect(0, 0, cv.width, cv.height);
++        if (Math.abs(px - sx) < 8 || Math.abs(py - sy) < 8) return;     // toque sem arrastar
++        onDraw([...toMm(sx, sy), ...toMm(px, py)]);
++      };
++      cv.addEventListener("pointerup", finish);
++      cv.addEventListener("pointercancel", () => { start = null; og.clearRect(0, 0, cv.width, cv.height); });
++    }
+     host.replaceChildren(wrap, legend);
+     return { area_m2: (grid.filter((v) => v > 1).length * res * res) / 1e6 };
+   }
+diff --git a/h50console/static/style.css b/h50console/static/style.css
+index 009051e..96cfd19 100644
+--- a/h50console/static/style.css
++++ b/h50console/static/style.css
+@@ -202,13 +202,13 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
+ body.viewer #tabs a[href="#robos"], body.viewer #tabs a[href="#diagnostico"], body.viewer #tabs a[href="#manutencao"],
+ body.viewer #tabs a[href="#laboratorio"], body.viewer .home-side, body.viewer #hist-sync, body.viewer #t-consumables button,
+ body.viewer #t-settings, body.viewer #notify-card, body.viewer #viewer-card, body.viewer #sec-pw, body.viewer #sec-all,
+-body.viewer #map-edit, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
++body.viewer #map-edit, body.viewer #zone-tools, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
+ body.viewer .home { grid-template-columns: 1fr; }
+ /* operador (Ingress do HA): comanda o robô e escolhe os modos; o resto é do administrador */
+ body.operator #tabs a[href="#robos"], body.operator #tabs a[href="#diagnostico"], body.operator #tabs a[href="#manutencao"],
+ body.operator #tabs a[href="#laboratorio"], body.operator #hist-sync, body.operator #t-consumables button,
+ body.operator #t-settings, body.operator #notify-card, body.operator #viewer-card, body.operator #sec-pw,
+-body.operator #sec-all, body.operator #map-edit, body.operator #onboarding, body.operator #qr-start,
++body.operator #sec-all, body.operator #map-edit, body.operator #zone-save, body.operator .zone-dels, body.operator #onboarding, body.operator #qr-start,
+ body.operator #cloud-connect .bar { display: none; }
+ .badge-viewer { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2, rgba(128,128,128,.18)); }
+ td button { white-space: nowrap; }
+@@ -222,3 +222,5 @@ main:focus { outline: none; }
+ .me-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+ .me-changes { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+ .me-tools button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
++#zone-tools { flex-wrap: wrap; gap: 6px; }
++.zone-dels { justify-content: flex-start; margin-top: 8px; }
+diff --git a/h50console/web.py b/h50console/web.py
+index e0c7206..0645c25 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from pathlib import Path
+ from urllib.parse import parse_qs, quote, urlparse
+ 
+-from . import catalog, dash, decoders
++from . import catalog, dash, decoders, zones
+ from .auth import AuthError, is_loopback
+ from .gateway import CommandBlocked, Gateway
+ from .miio import MiioError
+@@ -47,7 +47,7 @@ MAX_JSON = 1024 * 1024            # nenhum corpo JSON legítimo do app passa dis
+ VIEWER_GET = re.compile(
+     r"/api/(app|robots|stream|cloud/status)"
+     r"|/api/r/[\w-]+/(stream|health|state|rooms|custom|furniture|settings|consumables|history|history/path|schedules"
+-    r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status|zones/captured)")
++    r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status|zones)")
+ # único POST do visualizador: atualizar o mapa a partir da nuvem (só baixa; não mexe no robô)
+ VIEWER_POST = re.compile(r"/api/r/[\w-]+/cloud/map")
+ # perfil operador (Ingress do HA, usuários que não são administradores): o que o visualizador vê, mais comandar o robô e
+@@ -99,8 +99,11 @@ class App:
+             ("GET", r"/api/furniture", self.furniture),
+             ("POST", r"/api/clean/rooms", self.clean_rooms),
+             ("POST", r"/api/clean/custom/(\d+)", self.clean_custom),
+-            ("GET", r"/api/zones/captured", self.zones_captured),
+             ("POST", r"/api/clean/zones", self.clean_zones),
++            ("GET", r"/api/zones", self.zones_list),
++            ("POST", r"/api/zones", self.zone_add),
++            ("PUT", r"/api/zones/([0-9a-f]{8})", self.zone_rename),
++            ("DELETE", r"/api/zones/([0-9a-f]{8})", self.zone_delete),
+             ("POST", r"/api/actions/([\w-]+)", self.action),
+             ("GET", r"/api/settings", self.settings),
+             ("PUT", r"/api/settings/([\d-]+)", self.put_setting),
+@@ -207,8 +210,11 @@ class App:
+     def custom(self, **_):
+         names = {r["id"]: r["name"] for r in self.store.rooms()}
+         out = []
++        learned = zones.learned(self.store)
+         for c in decoders.custom_cleans(self.gw.cache.get("2/42")):
+-            out.append({**c, "rooms": [names.get(i, str(i)) for i in c["room_ids"]]})
++            plan = zones.routine_plan(c, learned)
++            out.append({**c, "rooms": [names.get(i, str(i)) for i in c["room_ids"]], "runnable": plan["runnable"],
++                        "reason": plan["reason"], "zones": plan["zones"]})
+         return out
+ 
+     def furniture(self, **_):
+@@ -485,50 +491,69 @@ class App:
+         routine = next((c for c in decoders.custom_cleans(self.gw.cache.get("2/42")) if c["id"] == int(cid)), None)
+         if routine is None:
+             raise ApiError(404, "rotina não encontrada")
+-        if not routine["room_ids"]:
+-            raise ApiError(409, "rotina sem cômodos: disparo nativo ainda não descoberto (P3)")
+-        # P3 pendente: usa a limpeza por cômodos com os cômodos da rotina. A ação 2/16 não leva o modo: o robô
+-        # usaria o modo global (2/4), que pode estar com pano numa rotina "só aspirar". Grava antes o modo da rotina.
+-        modes = sorted(set(routine["mop"]))
+-        if len(modes) > 1:
+-            raise ApiError(409, "esta rotina usa modos diferentes por cômodo; rode pelo app Xiaomi Home")
+-        if modes and modes[0] not in catalog.ENUM_PT["2/4"]:
+-            raise ApiError(409, f"modo {modes[0]} da rotina desconhecido; rode pelo app Xiaomi Home")
++        # P3 pendente (disparo nativo): limpa os cômodos (2/16) ou as zonas aprendidas (2/37) da rotina. Nenhuma das
++        # duas ações leva o modo: o robô usaria o modo global (2/4). Grava antes o modo da rotina.
++        plan = zones.routine_plan(routine, zones.learned(self.store))
++        if not plan["runnable"]:
++            raise ApiError(409, f'rotina "{routine["name"]}": {plan["reason"]}')
+         self.gw.check_start()
+-        mode = modes[0] if modes else None
++        mode = plan["mode"]
+         if mode is not None and self.gw.cache.get("2/4") != mode:
+             res = self.gw.set("2/4", mode)
+             if not isinstance(res, dict) or res.get("code") != 0:
+                 raise ApiError(502, f"não consegui ajustar o modo da rotina (2/4 = {mode}): {res}")
+-        return {"fallback": "clean_rooms", "mode": mode, **self.gw.clean_rooms(routine["room_ids"])}
+-
+-    def zones_captured(self, **_):
+-        """Zonas das últimas limpezas por zona feitas pelo app Xiaomi Home (o robô as informa no 2/40)."""
+-        out, seen = [], set()
+-        for row in self.store.prop_history("2/40", 2000):
+-            zones = decoders.captured_zones(row["new_value"])
+-            key = json.dumps(zones)
+-            if not zones or key in seen:
+-                continue
+-            seen.add(key)
+-            custom = decoders.running_custom(row["new_value"])
+-            sizes = [[round((max(z[0::2]) - min(z[0::2])) / 1000, 2), round((max(z[1::2]) - min(z[1::2])) / 1000, 2)]
+-                     for z in zones]
+-            out.append({"ts": row["ts"], "zones": zones, "sizes": sizes, "routine": custom["name"] if custom else None})
+-            if len(out) >= 10:
+-                break
+-        return out
+-
+-    # teste da limpeza por zona: só com o robô parado na base (carregando, carga completa ou base trabalhando na carga)
+-    ZONE_TEST_DOCKED = {2, 9, 14}
++        if plan["zones"]:
++            return {"fallback": "clean_zones", "mode": mode, **self.gw.clean_zones(plan["zones"])}
++        return {"fallback": "clean_rooms", "mode": mode, **self.gw.clean_rooms(plan["rooms"])}
+ 
+     def clean_zones(self, body, **_):
+-        zones = (body or {}).get("zones")
+-        decoders.zone_param(zones)                                # valida antes de qualquer coisa (400)
+-        status = self.gw.cache.get("2/2")
+-        if status not in self.ZONE_TEST_DOCKED:
+-            raise ApiError(409, f"teste da limpeza por zona só com o robô na base ({catalog.label('2/2', status)})")
+-        return self.gw.clean_zones(zones)
++        body = body or {}
++        if body.get("zone_id"):
++            zone = next((z for z in zones.saved(self.store) if z["id"] == body["zone_id"]), None)
++            if zone is None:
++                raise ApiError(404, "zona não encontrada")
++            rects = zone["zones"]
++        else:
++            rects = body.get("zones")
++        decoders.zone_param(rects)                                # valida antes de qualquer coisa (400)
++        return self.gw.clean_zones(rects)
++
++    # -- zonas com nome (salvar, renomear e apagar: só administrador) ----------------------------------------------
++    def _routine_names(self) -> list[str]:
++        return [c["name"] for c in decoders.custom_cleans(self.gw.cache.get("2/42"))]
++
++    def _zones_changed(self):
++        self.gw.bus.publish("zones", {"at": int(time.time())})
++
++    def zones_list(self, **_):
++        return zones.saved(self.store)
++
++    def zone_add(self, body, **_):
++        body = body or {}
++        try:
++            zone = zones.add(self.store, body.get("name"), body.get("zones"), self._routine_names())
++        except zones.ZoneError as ex:
++            raise ApiError(409 if ex.conflict else 400, str(ex)) from ex
++        self._zones_changed()
++        return zone
++
++    def zone_rename(self, zid, body, **_):
++        try:
++            zone = zones.rename(self.store, zid, (body or {}).get("name"), self._routine_names())
++        except zones.ZoneError as ex:
++            raise ApiError(409 if ex.conflict else 400, str(ex)) from ex
++        except KeyError as ex:
++            raise ApiError(404, "zona não encontrada") from ex
++        self._zones_changed()
++        return zone
++
++    def zone_delete(self, zid, **_):
++        try:
++            zones.delete(self.store, zid)
++        except KeyError as ex:
++            raise ApiError(404, "zona não encontrada") from ex
++        self._zones_changed()
++        return {"ok": True}
+ 
+     def action(self, name, **_):
+         if name not in catalog.SIMPLE_ACTIONS:
+diff --git a/h50console/zones.py b/h50console/zones.py
+new file mode 100644
+index 0000000..998c0af
+--- /dev/null
++++ b/h50console/zones.py
+@@ -0,0 +1,132 @@
++"""Limpeza por zona: zonas com nome (salvas no painel) e zonas aprendidas das rotinas do app Xiaomi Home.
++
++A ação 2/37 (start-zone-sweep) recebe as zonas (ver decoders.zone_param). A lista de rotinas (2/42) não traz as zonas
++de uma rotina por zonas: o robô só as informa no 2/40 enquanto a rotina roda. O painel guarda essa cópia (aprendida)
++por rotina, em app_setting, porque o prop_change é apagado pela retenção.
++"""
++
++from __future__ import annotations
++
++import secrets
++
++from . import catalog, decoders
++from .store import Store, iso
++
++SAVED_KEY = "zones_saved"            # [{"id", "name", "zones": [[x1,y1,x2,y2], ...]}]
++LEARNED_KEY = "routine_zones"        # {"<id da rotina>": {"name", "zones", "ts"}}
++MAX_SAVED = 30
++MAX_NAME = 40
++
++
++class ZoneError(ValueError):
++    """Pedido inválido (vira 400) ou conflito de nome (vira 409, ver `conflict`)."""
++
++    def __init__(self, message: str, conflict: bool = False):
++        super().__init__(message)
++        self.conflict = conflict
++
++
++# -- aprendidas das rotinas ------------------------------------------------------------------------------------------
++def learn(store: Store, raw_2_40) -> bool:
++    """2/40 de uma rotina por zonas em andamento -> guarda as zonas da rotina. True se mudou algo."""
++    custom = decoders.running_custom(raw_2_40)
++    if not custom or not custom.get("zones") or custom.get("id") is None:
++        return False
++    learned = store.get_setting(LEARNED_KEY) or {}
++    key = str(custom["id"])
++    zones = [list(z) for z in custom["zones"]]
++    if (learned.get(key) or {}).get("zones") == zones:
++        return False
++    learned[key] = {"name": custom.get("name", ""), "zones": zones, "ts": iso()}
++    store.set_setting(LEARNED_KEY, learned)
++    return True
++
++
++def learned(store: Store) -> dict[str, dict]:
++    """Zonas aprendidas por rotina. Na primeira vez, importa o que já estiver no histórico de mudanças do 2/40."""
++    data = store.get_setting(LEARNED_KEY)
++    if data is None:
++        data = {}
++        for row in reversed(store.prop_history("2/40", 5000)):            # do mais antigo ao mais novo
++            custom = decoders.running_custom(row["new_value"])
++            if custom and custom.get("zones") and custom.get("id") is not None:
++                data[str(custom["id"])] = {"name": custom.get("name", ""), "zones": [list(z) for z in custom["zones"]],
++                                           "ts": row["ts"]}
++        store.set_setting(LEARNED_KEY, data)
++    return data
++
++
++def routine_plan(routine: dict, learned_zones: dict[str, dict]) -> dict:
++    """Como o painel roda uma rotina: {"runnable", "reason", "mode", "rooms", "zones"}.
++
++    O campo "mop" do 2/42 lista os modos (2/4) que a rotina usa; com mais de um, não dá para saber qual cômodo usa qual.
++    Rotina sem cômodos é por zonas: só roda depois que o painel aprendeu as zonas dela.
++    """
++    plan = {"runnable": False, "reason": None, "mode": None, "rooms": list(routine["room_ids"]), "zones": None}
++    modes = sorted(set(routine["mop"]))
++    if len(modes) > 1:
++        plan["reason"] = "modos diferentes por cômodo: use o app Xiaomi Home"
++        return plan
++    if modes and modes[0] not in catalog.ENUM_PT["2/4"]:
++        plan["reason"] = f"modo {modes[0]} desconhecido: use o app Xiaomi Home"
++        return plan
++    plan["mode"] = modes[0] if modes else None
++    if not plan["rooms"]:
++        known = learned_zones.get(str(routine["id"]))
++        if not known:
++            plan["reason"] = "rode uma vez pelo app Xiaomi Home para o painel aprender as zonas"
++            return plan
++        plan["zones"] = known["zones"]
++    plan["runnable"] = True
++    return plan
++
++
++# -- zonas com nome --------------------------------------------------------------------------------------------------
++def saved(store: Store) -> list[dict]:
++    return store.get_setting(SAVED_KEY) or []
++
++
++def _norm(name: str) -> str:
++    return " ".join(name.split()).casefold()
++
++
++def check_name(name, store: Store, routine_names: list[str], ignore_id: str | None = None) -> str:
++    """Nome limpo, ou ZoneError: vazio, longo demais, igual ao de outra zona ou ao de uma rotina do app."""
++    if not isinstance(name, str) or not name.strip():
++        raise ZoneError("informe um nome para a zona")
++    name = " ".join(name.split())
++    if len(name) > MAX_NAME:
++        raise ZoneError(f"nome com mais de {MAX_NAME} caracteres")
++    if any(_norm(r) == _norm(name) for r in routine_names):
++        raise ZoneError(f'já existe uma rotina chamada "{name}"', conflict=True)
++    if any(_norm(z["name"]) == _norm(name) and z["id"] != ignore_id for z in saved(store)):
++        raise ZoneError(f'já existe uma zona chamada "{name}"', conflict=True)
++    return name
++
++
++def add(store: Store, name, rects, routine_names: list[str]) -> dict:
++    name = check_name(name, store, routine_names)
++    decoders.zone_param(rects)                                       # valida (ValueError -> 400)
++    zones = saved(store)
++    if len(zones) >= MAX_SAVED:
++        raise ZoneError(f"limite de {MAX_SAVED} zonas salvas")
++    zone = {"id": secrets.token_hex(4), "name": name, "zones": [[round(v) for v in r] for r in rects]}
++    store.set_setting(SAVED_KEY, zones + [zone])
++    return zone
++
++
++def rename(store: Store, zid: str, name, routine_names: list[str]) -> dict:
++    zones = saved(store)
++    zone = next((z for z in zones if z["id"] == zid), None)
++    if zone is None:
++        raise KeyError(zid)
++    zone["name"] = check_name(name, store, routine_names, ignore_id=zid)
++    store.set_setting(SAVED_KEY, zones)
++    return zone
++
++
++def delete(store: Store, zid: str) -> None:
++    zones = saved(store)
++    if not any(z["id"] == zid for z in zones):
++        raise KeyError(zid)
++    store.set_setting(SAVED_KEY, [z for z in zones if z["id"] != zid])
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 93ce7c2..63e15c7 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -532,7 +532,7 @@ class IngressRoles(unittest.TestCase):
+     def test_operator_commands_the_robot_but_does_not_configure(self):
+         allowed = [("POST", "/api/r/sala/actions/start"), ("POST", "/api/actions/dust"), ("POST", "/api/r/sala/actions/home"),
+                    ("POST", "/api/r/sala/clean/rooms"), ("POST", "/api/r/sala/clean/custom/2"),
+-                   ("POST", "/api/r/sala/clean/zones"), ("GET", "/api/r/sala/zones/captured"),
++                   ("POST", "/api/r/sala/clean/zones"), ("GET", "/api/r/sala/zones"),
+                    ("POST", "/api/r/sala/cloud/map"), ("PUT", "/api/r/sala/settings/2-9"), ("PUT", "/api/settings/2-4"),
+                    ("PUT", "/api/r/sala/settings/2-83"), ("GET", "/api/r/sala/state"), ("GET", "/api/robots")]
+         blocked = [("POST", "/api/robots"), ("DELETE", "/api/robots/sala"), ("PUT", "/api/robots/sala"),
+@@ -542,7 +542,8 @@ class IngressRoles(unittest.TestCase):
+                    ("POST", "/api/cloud/qr"), ("POST", "/api/cloud/logout"), ("POST", "/api/r/sala/cloud/history"),
+                    ("POST", "/api/r/sala/map/edit/save"), ("PUT", "/api/r/sala/app/name"), ("GET", "/api/r/sala/commands"),
+                    ("POST", "/api/r/sala/actions/start/../../robots"), ("POST", "/api/auth/viewer"),
+-                   ("POST", "/api/auth/password")]
++                   ("POST", "/api/auth/password"), ("POST", "/api/r/sala/zones"), ("PUT", "/api/r/sala/zones/abcd1234"),
++                   ("DELETE", "/api/r/sala/zones/abcd1234")]
+         for method, path in allowed:
+             st, body = self.req(method, path, user="maria", body={} if method != "GET" else None)
+             self.assertNotEqual(st, 403, (method, path, body))
+@@ -558,7 +559,7 @@ class IngressRoles(unittest.TestCase):
+         self.assertEqual(self.role(user="maria"), "viewer")
+         self.assertEqual(self.req("POST", "/api/r/sala/actions/start", user="maria", body={})[0], 403)
+         self.assertEqual(self.req("POST", "/api/r/sala/clean/zones", user="maria", body={})[0], 403)
+-        self.assertNotEqual(self.req("GET", "/api/r/sala/zones/captured", user="maria")[0], 403)
++        self.assertNotEqual(self.req("GET", "/api/r/sala/zones", user="maria")[0], 403)
+         self.assertEqual(self.role(user="x", groups="system-admin"), "admin")
+ 
+     def test_config(self):
+diff --git a/tests/test_stage1.py b/tests/test_stage1.py
+index 3ba88d1..978a1ec 100644
+--- a/tests/test_stage1.py
++++ b/tests/test_stage1.py
+@@ -1,4 +1,3 @@
+-import json
+ import unittest
+ from datetime import datetime, timezone
+ 
+@@ -88,12 +87,6 @@ class Decoders(unittest.TestCase):
+                          '[{"blocks_region":[0,1000,0,0,1000,0,1000,1000],"blocks_attr":0}]')
+         with self.assertRaises(ValueError):
+             decoders.zone_param([[0, 0, 1000, 1000]] * 11)
+-        z = [[1, 2, 3, 4, 5, 6, 7, 8]]
+-        self.assertEqual(decoders.captured_zones(json.dumps({"zones": z})), z)
+-        ud = {"user_define": {"id": 1, "name": "Pelos gatos", "user_data": [["mode", "mode_data"], [2, z]]}}
+-        self.assertEqual(decoders.captured_zones(json.dumps(ud)), z)
+-        self.assertIsNone(decoders.captured_zones('{"rooms": [3]}'))
+-        self.assertIsNone(decoders.captured_zones(""))
+ 
+     def test_custom_cleans(self):
+         c = {x["name"]: x for x in decoders.custom_cleans(self.v["2/42"])}
+diff --git a/tests/test_stage23.py b/tests/test_stage23.py
+index 092ebb7..280e33f 100644
+--- a/tests/test_stage23.py
++++ b/tests/test_stage23.py
+@@ -176,6 +176,8 @@ class PollerTests(unittest.TestCase):
+             self.p.tick()
+         rec = {r["stime"]: r for r in self.store.cleanings()}[1791747463]
+         self.assertEqual((rec["sweep_type"], rec["raw_label"], rec["area_m2"]), (7, "custom:Pelos gatos", 1.67))
++        from h50console import zones                     # as zonas da rotina ficam aprendidas para o painel rodá-la
++        self.assertEqual(zones.learned(self.store)["1"]["zones"], [[0, 0, 1, 0, 1, 1, 0, 1]])
+ 
+     def test_restart_mid_cleaning_reconstructs_from_db(self):
+         # instância 1 vê o início de uma limpeza por zonas (sequência real de 11/10 16:47)
+diff --git a/tests/test_web.py b/tests/test_web.py
+index 7022fa4..6b00252 100644
+--- a/tests/test_web.py
++++ b/tests/test_web.py
+@@ -224,32 +224,64 @@ class WebTests(unittest.TestCase):
+         finally:
+             self.gw.cache.update({"2/42": old, "2/2": 2})
+ 
+-    def test_zone_clean(self):
+-        from datetime import datetime, timezone
++    def test_zones(self):
++        from h50console import zones
+         sofa = [1000, -500, 1000, 700, 2500, 700, 2500, -500]
+-        self.store.save_changes({"2/40": ("", json.dumps({"zones": [sofa], "clean_mode": 1}))},
+-                                datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc))
+-        self.store.save_changes({"2/40": ("", json.dumps({"clean_mode": 1}))})
+-        _, captured = self.call("GET", "/api/zones/captured")
+-        self.assertEqual(captured[0]["zones"], [sofa])
+-        self.assertEqual(captured[0]["sizes"], [[1.5, 1.2]])
+-        self.gw.cache.update({"2/2": 9})
++        ud = {"user_define": {"id": 1791744466, "name": "Pelos gatos", "user_data": [["mode", "mode_data"], [2, [sofa]]]}}
++        self.store.set_setting(zones.SAVED_KEY, [])
+         try:
++            # rotina por zonas ainda não vista: ▶ desabilitado com o motivo, e o painel recusa
++            self.store._exec("DELETE FROM app_setting WHERE key=?", (zones.LEARNED_KEY,))
++            _, custom = self.call("GET", "/api/custom")
++            gatos = next(c for c in custom if c["name"] == "Pelos gatos")
++            self.assertFalse(gatos["runnable"])
++            self.assertIn("aprender as zonas", gatos["reason"])
++            self.assertEqual(self.call("POST", f"/api/clean/custom/{gatos['id']}")[0], 409)
++            # o robô roda a rotina pelo app: o poller aprende as zonas pelo 2/40
++            self.assertTrue(zones.learn(self.store, json.dumps(ud)))
++            self.assertFalse(zones.learn(self.store, json.dumps(ud)))            # sem mudança
++            _, custom = self.call("GET", "/api/custom")
++            gatos = next(c for c in custom if c["name"] == "Pelos gatos")
++            self.assertEqual((gatos["runnable"], gatos["zones"]), (True, [sofa]))
++            self.gw.cache.update({"2/4": 3}); self.fake.values["2/4"] = 3
+             self.fake.calls.clear()
+-            st, res = self.call("POST", "/api/clean/zones", {"zones": [sofa]})
+-            self.assertEqual((st, res["code"]), (200, 0))
+-            method, params = self.fake.calls[-1]
+-            self.assertEqual((method, params["siid"], params["aiid"]), ("action", 2, 37))
+-            self.assertEqual(json.loads(params["in"][0]["value"]),
++            st, res = self.call("POST", f"/api/clean/custom/{gatos['id']}")
++            self.assertEqual((st, res["fallback"], res["mode"]), (200, "clean_zones", 1))
++            sent = [(m, p) for m, p in self.fake.calls if m in ("set_properties", "action")]
++            self.assertEqual([m for m, _ in sent], ["set_properties", "action"])      # modo antes da zona
++            self.assertEqual((sent[1][1]["siid"], sent[1][1]["aiid"]), (2, 37))
++            self.assertEqual(json.loads(sent[1][1]["in"][0]["value"]),
+                              [{"blocks_region": [1000, 700, 1000, -500, 2500, -500, 2500, 700], "blocks_attr": 0}])
+-            self.assertEqual(params["in"][0]["piid"], 12)
+-            for bad in ({}, {"zones": []}, {"zones": [[1, 2, 3]]}, {"zones": [[0, 0, 100, 100]]}):   # 100 mm: pequena
+-                self.assertEqual(self.call("POST", "/api/clean/zones", bad)[0], 400, bad)
+-            self.gw.cache.update({"2/2": 4})                      # fora da base: recusa sem enviar
++            # zonas com nome: nome único e diferente das rotinas
++            st, z = self.call("POST", "/api/zones", {"name": "  Frente  do sofá ", "zones": [[1000, -500, 2500, 700]]})
++            self.assertEqual((st, z["name"]), (200, "Frente do sofá"))
++            self.assertEqual(self.call("POST", "/api/zones", {"name": "frente do SOFÁ", "zones": [[0, 0, 900, 900]]})[0], 409)
++            st, res = self.call("POST", "/api/zones", {"name": "pelos gatos", "zones": [[0, 0, 900, 900]]})
++            self.assertEqual(st, 409)
++            self.assertIn("rotina", res["error"])
++            self.assertEqual(self.call("POST", "/api/zones", {"name": "", "zones": [[0, 0, 900, 900]]})[0], 400)
++            self.assertEqual(self.call("POST", "/api/zones", {"name": "x", "zones": [[0, 0, 100, 100]]})[0], 400)
++            self.assertEqual(self.call("PUT", f"/api/zones/{z['id']}", {"name": "Sala intenso"})[0], 409)
++            self.assertEqual(self.call("PUT", f"/api/zones/{z['id']}", {"name": "Sofá"})[1]["name"], "Sofá")
++            self.assertEqual([x["name"] for x in self.call("GET", "/api/zones")[1]], ["Sofá"])
++            # limpar pela zona salva ou por coordenadas
+             self.fake.calls.clear()
+-            self.assertEqual(self.call("POST", "/api/clean/zones", {"zones": [sofa]})[0], 409)
+-            self.assertFalse([c for c in self.fake.calls if c[0] == "action"])
++            self.assertEqual(self.call("POST", "/api/clean/zones", {"zone_id": z["id"]})[1]["code"], 0)
++            self.assertEqual(self.fake.calls[-1][1]["aiid"], 37)
++            self.assertEqual(self.call("POST", "/api/clean/zones", {"zone_id": "ffffffff"})[0], 404)
++            for bad in ({}, {"zones": []}, {"zones": [[1, 2, 3]]}, {"zones": [[0, 0, 100, 100]]}):
++                self.assertEqual(self.call("POST", "/api/clean/zones", bad)[0], 400, bad)
++            self.gw.cache.update({"2/2": 12})                                  # base trabalhando: não sai
++            self.assertEqual(self.call("POST", "/api/clean/zones", {"zone_id": z["id"]})[0], 409)
++            self.gw.cache.update({"2/2": 2})
++            self.assertEqual(self.call("DELETE", f"/api/zones/{z['id']}")[0], 200)
++            self.assertEqual(self.call("DELETE", f"/api/zones/{z['id']}")[0], 404)
++            # importação do histórico (instalação que já tinha capturado a rotina antes desta versão)
++            self.store._exec("DELETE FROM app_setting WHERE key=?", (zones.LEARNED_KEY,))
++            self.store.save_changes({"2/40": ("", json.dumps(ud))})
++            self.assertEqual(zones.learned(self.store)["1791744466"]["zones"], [sofa])
+         finally:
++            self.store.set_setting(zones.SAVED_KEY, [])
+             self.gw.cache.update({"2/2": 2})
+ 
+     def test_actions_blocked(self):
+-- 
+2.53.0
+
