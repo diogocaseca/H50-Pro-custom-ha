@@ -77,7 +77,7 @@ O painel aparece na barra lateral de **todos** os usuários do Home Assistant. O
 | Perfil | Quem | O que pode |
 |---|---|---|
 | Administrador | Administradores do HA e os logins listados em `admins` | Tudo |
-| Operador (`others: operator`, padrão) | Os demais usuários do HA | Ver tudo o que o somente leitura vê; iniciar, pausar, continuar, parar, voltar à base, localizar, limpar cômodos e rotinas, as funções da base (esvaziar pó, lavar e secar o mop) e escolher os modos da limpeza no **Início** (modo, sucção, água, caminho, passadas, atalho) |
+| Operador (`others: operator`, padrão) | Os demais usuários do HA | Ver tudo o que o somente leitura vê; iniciar, pausar, continuar, parar, voltar à base, localizar, limpar cômodos e rotinas, o teste de limpeza por zona, as funções da base (esvaziar pó, lavar e secar o mop) e escolher os modos da limpeza no **Início** (modo, sucção, água, caminho, passadas, atalho) |
 | Somente leitura (`others: viewer`) | Os demais usuários do HA | Só consultar |
 
 O operador **não** mexe na aba **Ajustes** nem nas configurações da estação, não cadastra nem remove robôs, não mexe na
@@ -106,6 +106,18 @@ aspirar e esfregar...). Por isso:
 - sucção, água, passadas e caminho são os atuais (a rotina não informa esses ajustes ao robô);
 - rotina com modos diferentes por cômodo (ex.: aspira a sala e passa pano na cozinha) e rotina por zonas, sem
   cômodos, não rodam pelo painel: use o app Xiaomi Home.
+
+### Teste: limpeza por zona
+
+O comando de limpar zonas do H50 Pro ainda não foi confirmado. O cartão **Teste: limpeza por zona**, no Início, serve
+para descobrir:
+
+1. Rode uma limpeza por zona (ou uma rotina por zonas) pelo app Xiaomi Home. Enquanto ela roda, o robô informa as
+   zonas e o painel as guarda.
+2. Com o robô de volta na base, toque em ▶ na zona e confirme. Fique por perto para parar se precisar.
+3. O painel mostra a resposta do robô e acompanha o status por até 60 s. Se aparecer **FUNCIONOU**, o robô aceitou
+   a zona. Com **Voltar à base depois de confirmar** marcado, ele volta em seguida; desmarque para ver se ele limpa
+   o lugar certo.
 
 ## Integração MQTT (robô como dispositivo do HA)
 

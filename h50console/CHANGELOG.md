@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.7
+
+- Teste: cartão **Teste: limpeza por zona** no Início (administrador e operador). Lista as zonas das últimas limpezas
+  por zona feitas pelo app Xiaomi Home e manda o robô limpar uma delas pela rede local, para descobrir se o H50 Pro
+  aceita o comando de zona (patch 0008). Só com o robô na base.
+
 ## 0.3.6
 
 - MQTT: sensor binário **Limpeza em andamento**, ligado do início ao fim da limpeza. Pausas e idas à base no meio da
