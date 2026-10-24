@@ -17,6 +17,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -142,8 +143,19 @@ def device_key(robot: dict) -> str:
     return f"h50console_{robot.get('did') or robot['id']}"
 
 
-def discovery(robot: dict, version: str = "") -> tuple[str, dict]:
-    """(object_id, payload) da descoberta por dispositivo (homeassistant/device/<object_id>/config)."""
+def dynamic_buttons(routines: list[dict], zones: list[dict]) -> dict[str, tuple[str, str]]:
+    """Botões das rotinas que o painel consegue rodar e das zonas salvas: {id do componente: (nome, ícone)}."""
+    out = {f"routine_{r['id']}": (f"Rotina: {r['name']}", "mdi:playlist-play") for r in routines if r.get("runnable")}
+    out.update({f"zone_{z['id']}": (f"Zona: {z['name']}", "mdi:selection-drag") for z in zones})
+    return out
+
+
+def discovery(robot: dict, version: str = "", buttons: dict[str, tuple[str, str]] | None = None,
+              removed: list[str] = ()) -> tuple[str, dict]:
+    """(object_id, payload) da descoberta por dispositivo (homeassistant/device/<object_id>/config).
+
+    `buttons` = botões de rotinas e zonas (dynamic_buttons); `removed` = os que existiam e saíram (vão só com a
+    plataforma, que é como o HA remove a entidade)."""
     rid, key = robot["id"], device_key(robot)
     t = topics(rid)
     avail = [{"t": BRIDGE_STATUS}, {"t": t["availability"]}]
@@ -206,6 +218,11 @@ def discovery(robot: dict, version: str = "") -> tuple[str, dict]:
     for action, (name, icon) in BUTTONS.items():
         cmps[f"button_{action}"] = {"p": "button", "name": name, "uniq_id": f"{key}_button_{action}", **common,
                                     "cmd_t": f"{t['cmd']}/button/{action}", "ic": icon}
+    for cid, (name, icon) in (buttons or {}).items():
+        cmps[cid] = {"p": "button", "name": name, "uniq_id": f"{key}_{cid}", **common,
+                     "cmd_t": f"{t['cmd']}/button/{cid}", "ic": icon}
+    for cid in removed:
+        cmps.setdefault(cid, {"p": "button"})
 
     device = {"ids": [key], "name": robot.get("name") or rid, "mf": "Xiaomi", "mdl": robot.get("model") or "H50 Pro"}
     payload = {"dev": device, "o": {**ORIGIN, **({"sw": version} if version else {})}, "cmps": cmps,
@@ -213,7 +230,8 @@ def discovery(robot: dict, version: str = "") -> tuple[str, dict]:
     return key, payload
 
 
-def command_calls(rid: str, sub: str, payload: str, status=None) -> list[tuple[str, str, dict | None]]:
+def command_calls(rid: str, sub: str, payload: str, status=None,
+                  zones: list[dict] = ()) -> list[tuple[str, str, dict | None]]:
     """Comando recebido em h50console/<rid>/cmd/<sub> -> chamadas (método, caminho, corpo) à API do painel."""
     r = f"/api/r/{rid}"
     payload = payload.strip()
@@ -238,6 +256,10 @@ def command_calls(rid: str, sub: str, payload: str, status=None) -> list[tuple[s
         return [("PUT", f"{r}/settings/{key.replace('/', '-')}", {"value": _code(options, payload, name)})]
     if sub.startswith("button/"):
         name = sub.split("/", 1)[1]
+        if re.fullmatch(r"routine_\d+", name):
+            return [("POST", f"{r}/clean/custom/{name.split('_', 1)[1]}", None)]
+        if re.fullmatch(r"zone_[0-9a-f]{8}", name):
+            return [("POST", f"{r}/clean/zones", {"zone_id": name.split("_", 1)[1]})]
         if name not in BUTTONS:
             raise CommandError(f"botão desconhecido: {name}")
         return action(name)
@@ -250,7 +272,7 @@ def command_calls(rid: str, sub: str, payload: str, status=None) -> list[tuple[s
             raise CommandError("nenhum cômodo escolhido")
         return [("POST", f"{r}/clean/rooms", {"ids": ids})]
     if sub == "send":
-        return _send_command(r, payload)
+        return _send_command(r, payload, zones)
     raise CommandError(f"tópico de comando desconhecido: {sub}")
 
 
@@ -261,7 +283,7 @@ def _code(options: dict, label: str, what: str) -> int:
     raise CommandError(f"{what} desconhecido(a): {label!r} (opções: {', '.join(options.values())})")
 
 
-def _send_command(r: str, payload: str):
+def _send_command(r: str, payload: str, zones: list[dict] = ()):
     """vacuum.send_command: texto puro (ação) ou JSON {"command": ..., <parâmetros>} (formato do MQTT vacuum do HA)."""
     try:
         msg = json.loads(payload)
@@ -287,7 +309,18 @@ def _send_command(r: str, payload: str):
             return [("POST", f"{r}/clean/custom/{int(msg.get('id'))}", None)]
         except (ValueError, TypeError) as ex:
             raise CommandError('custom precisa de "id": <número da rotina>') from ex
-    raise CommandError(f"send_command desconhecido: {cmd!r} (use clean_rooms, custom ou uma ação: "
+    if cmd == "clean_zones":
+        if isinstance(msg.get("zone"), str):
+            wanted = " ".join(msg["zone"].split()).casefold()
+            zone = next((z for z in zones if " ".join(z["name"].split()).casefold() == wanted), None)
+            if zone is None:
+                raise CommandError(f"zona salva desconhecida: {msg['zone']!r} (zonas: {', '.join(z['name'] for z in zones)})")
+            return [("POST", f"{r}/clean/zones", {"zone_id": zone["id"]})]
+        rects = msg.get("zones")
+        if not isinstance(rects, list) or not rects:
+            raise CommandError('clean_zones precisa de "zone": "<nome da zona salva>" ou "zones": [[x1, y1, x2, y2]] (mm)')
+        return [("POST", f"{r}/clean/zones", {"zones": rects})]
+    raise CommandError(f"send_command desconhecido: {cmd!r} (use clean_rooms, clean_zones, custom ou uma ação: "
                        f"{', '.join(sorted(SEND_ACTIONS))})")
 
 
@@ -362,6 +395,9 @@ class Bridge:
         self.state_file = state_file
         self.robots: dict[str, dict] = {}          # id -> resumo da API (/api/robots)
         self.rooms: dict[str, list[dict]] = {}
+        self.routines: dict[str, list[dict]] = {}   # /api/custom de cada robô
+        self.zones: dict[str, list[dict]] = {}      # zonas salvas de cada robô
+        self._buttons: dict[str, list[str]] | None = None   # botões de rotinas/zonas já anunciados (ver _published_buttons)
         self.status: dict[str, object] = {}        # último 2/2 de cada robô (para "start" virar "resume")
         self.cleaning: dict[str, bool] = {}        # "Limpeza em andamento" de cada robô
         self.dirty: set[str] = set()
@@ -428,13 +464,50 @@ class Bridge:
         with self.lock:
             self.robots = robots
             self.dirty.update(robots)
+        old_buttons = self._published_buttons()
+        new_buttons = {}
         for rid, robot in robots.items():
-            object_id, payload = discovery(robot, self.version)
-            self._pub(self.discovery_topic(object_id), payload)
             self._load_rooms(rid)
+            self._load_extras(rid)
+            buttons = dynamic_buttons(self.routines.get(rid, []), self.zones.get(rid, []))
+            new_buttons[rid] = sorted(buttons)
+            removed = [c for c in old_buttons.get(rid, []) if c not in buttons]
+            object_id, payload = discovery(robot, self.version, buttons, removed)
+            self._pub(self.discovery_topic(object_id), payload)
         self._save_keys(keys)
+        self._save_buttons(new_buttons)
         self._last_resync = time.monotonic()
         self._sync_streams()
+
+    def _load_extras(self, rid: str) -> None:
+        """Rotinas e zonas salvas (botões no HA). Se o painel não responder, mantém o que já se sabia."""
+        for attr, path in (("routines", "custom"), ("zones", "zones")):
+            try:
+                getattr(self, attr)[rid] = list(self.api.call("GET", f"/api/r/{rid}/{path}"))
+            except (ApiError, OSError, TypeError) as ex:
+                log.debug("%s de %s indisponíveis: %s", path, rid, ex)
+                getattr(self, attr).setdefault(rid, [])
+
+    def _buttons_file(self) -> Path | None:
+        return self.state_file.with_name("mqtt-buttons.json") if self.state_file else None
+
+    def _published_buttons(self) -> dict[str, list[str]]:
+        """Botões de rotinas e zonas anunciados antes (para tirar do HA os que saíram, mesmo depois de reiniciar)."""
+        if self._buttons is None:
+            try:
+                self._buttons = json.loads(self._buttons_file().read_text(encoding="utf-8")) if self._buttons_file() else {}
+            except (OSError, ValueError):
+                self._buttons = {}
+        return self._buttons
+
+    def _save_buttons(self, buttons: dict[str, list[str]]) -> None:
+        self._buttons = buttons
+        f = self._buttons_file()
+        if f:
+            try:
+                f.write_text(json.dumps(buttons), encoding="utf-8")
+            except OSError as ex:
+                log.warning("não consegui gravar %s: %s", f, ex)
 
     def _load_rooms(self, rid: str) -> None:
         try:
@@ -477,7 +550,7 @@ class Bridge:
             log.warning("comando para robô desconhecido: %s", rid)
             return
         try:
-            calls = command_calls(rid, sub, payload, self.status.get(rid))
+            calls = command_calls(rid, sub, payload, self.status.get(rid), self.zones.get(rid, []))
         except CommandError as ex:
             log.warning("comando ignorado (%s): %s", topic, ex)
             return
@@ -517,6 +590,8 @@ class Bridge:
                     elif event in ("state", "online", "offline", "command", "cleaning", "fault"):
                         with self.lock:
                             self.dirty.add(rid)
+                    elif event == "zones":                 # zona salva/apagada ou rotina aprendida: botões
+                        self._want_resync = True
                     elif event in ("map", "mapdata"):
                         self._load_rooms(rid)
                         with self.lock:

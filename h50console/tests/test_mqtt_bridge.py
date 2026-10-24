@@ -15,6 +15,9 @@ STATE = {"health": {"online": True}, "status": 4, "status_label": "Limpando", "b
                     "2/3": 0, "2/97": 1, "2/98": 0, "12/1": 90, "13/1": 80, "14/1": 70, "9/1": 60, "18/1": 50,
                     "19/1": None}}
 ROOMS = [{"id": 3, "name": "Sala", "last_clean": None}, {"id": 5, "name": "Cozinha", "last_clean": None}]
+ROUTINES = [{"id": 1787794565, "name": "Aspiração da manhã", "runnable": True},
+            {"id": 1788583425, "name": "Cômodos e cozin bife", "runnable": False}]
+ZONES = [{"id": "ab12cd34", "name": "Frente do sofá", "zones": [[147, -464, 2924, -1921]]}]
 
 
 class Mapping(unittest.TestCase):
@@ -101,10 +104,39 @@ class Mapping(unittest.TestCase):
         self.assertNotIn("detergent", mb.attrs_payload(STATE)["consumables"])
         self.assertEqual(mb.discovery({"id": "x"})[0], "h50console_x")    # sem DID: id do painel
 
+    def test_routine_and_zone_buttons(self):
+        buttons = mb.dynamic_buttons(ROUTINES, ZONES)
+        self.assertEqual(buttons, {"routine_1787794565": ("Rotina: Aspiração da manhã", "mdi:playlist-play"),
+                                   "zone_ab12cd34": ("Zona: Frente do sofá", "mdi:selection-drag")})   # só as que rodam
+        _, p = mb.discovery(ROBOT, "0.4.0", buttons, removed=["zone_00000000"])
+        b = p["cmps"]["zone_ab12cd34"]
+        self.assertEqual((b["p"], b["name"], b["cmd_t"], b["uniq_id"]),
+                         ("button", "Zona: Frente do sofá", "h50console/sala/cmd/button/zone_ab12cd34",
+                          "h50console_123456_zone_ab12cd34"))
+        self.assertEqual(p["cmps"]["zone_00000000"], {"p": "button"})
+
 
 class Commands(unittest.TestCase):
     def calls(self, sub, payload, status=None):
-        return mb.command_calls("sala", sub, payload, status)
+        return mb.command_calls("sala", sub, payload, status, ZONES)
+
+    def test_routine_and_zone_commands(self):
+        self.assertEqual(self.calls("button/routine_1787794565", "PRESS"),
+                         [("POST", "/api/r/sala/clean/custom/1787794565", None)])
+        self.assertEqual(self.calls("button/zone_ab12cd34", "PRESS"),
+                         [("POST", "/api/r/sala/clean/zones", {"zone_id": "ab12cd34"})])
+        send = lambda m: self.calls("send", json.dumps(m))       # noqa: E731
+        self.assertEqual(send({"command": "clean_zones", "zone": " frente  DO sofá"}),
+                         [("POST", "/api/r/sala/clean/zones", {"zone_id": "ab12cd34"})])
+        self.assertEqual(send({"command": "clean_zones", "zones": [[0, 0, 1000, 1000]]}),
+                         [("POST", "/api/r/sala/clean/zones", {"zones": [[0, 0, 1000, 1000]]})])
+        for bad in ({"command": "clean_zones", "zone": "Varanda"}, {"command": "clean_zones"},
+                    {"command": "clean_zones", "zones": []}):
+            with self.assertRaises(mb.CommandError):
+                send(bad)
+        for bad in ("button/routine_x", "button/zone_XYZ", "button/zone_ab12cd34/../x"):
+            with self.assertRaises(mb.CommandError):
+                self.calls(bad, "PRESS")
 
     def test_vacuum_commands(self):
         a = "/api/r/sala/actions/"
@@ -147,6 +179,7 @@ class Commands(unittest.TestCase):
 class FakeApi:
     def __init__(self):
         self.robots = [dict(ROBOT)]
+        self.routines, self.zones = list(ROUTINES), list(ZONES)
         self.state = json.loads(json.dumps(STATE))
         self.calls = []
         self.fail = None
@@ -161,6 +194,10 @@ class FakeApi:
             return self.robots
         if path.endswith("/rooms"):
             return ROOMS
+        if path.endswith("/custom"):
+            return self.routines
+        if path.endswith("/zones"):
+            return self.zones
         if path.endswith("/state"):
             return self.state
         raise mb.ApiError(404, path)
@@ -219,6 +256,33 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(seen, [False, False, True, True, True, True, False, False, False])
         disc = json.loads(self.published()["homeassistant/device/h50console_123456/config"])
         self.assertEqual((disc["cmps"]["cleaning"]["p"], disc["cmps"]["cleaning"]["dev_cla"]), ("binary_sensor", "running"))
+
+    def test_buttons_follow_routines_and_zones(self):
+        self.bridge.on_connect()
+        topic = "homeassistant/device/h50console_123456/config"
+        cmps = json.loads(self.published()[topic])["cmps"]
+        self.assertIn("routine_1787794565", cmps)
+        self.assertIn("zone_ab12cd34", cmps)
+        self.assertNotIn("routine_1788583425", cmps)                  # não roda pelo painel: sem botão
+        # zona apagada no painel, com a ponte reiniciada: o botão sai do HA
+        self.api.zones = []
+        fresh = mb.Bridge(self.api, lambda t, p, r: self.out.append((t, p, r)), "homeassistant",
+                          Path(self.tmp.name) / "mqtt-robots.json")
+        self.addCleanup(fresh.stop.set)
+        fresh.on_connect()
+        cmps = json.loads(self.published()[topic])["cmps"]
+        self.assertEqual(cmps["zone_ab12cd34"], {"p": "button"})
+        # o evento "zones" do painel pede uma nova descoberta
+        fresh._want_resync = False
+        self.api.events = lambda path, stop: iter([("zones", {})])
+        stop = threading.Event()
+        threading.Thread(target=fresh._stream_loop, args=("/api/r/sala/stream", "sala", stop), daemon=True).start()
+        for _ in range(50):
+            if fresh._want_resync:
+                break
+            threading.Event().wait(0.02)
+        stop.set()
+        self.assertTrue(fresh._want_resync)
 
     def test_offline_robot_and_removed_robot(self):
         self.bridge.on_connect()
