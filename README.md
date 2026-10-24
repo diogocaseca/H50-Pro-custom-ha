@@ -50,7 +50,7 @@ Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta ex
 | 0008 | Teste da limpeza por zona (ação 2/37, formato do xiaomi-vac nos modelos irmãos) com as zonas capturadas do app Xiaomi Home, com testes |
 | 0009 | Limpeza por zona: desenhar zonas no mapa, zonas com nome (só admin salva e apaga) e rotinas por zonas com as zonas aprendidas do app Xiaomi Home; tira o cartão de teste, com testes |
 | 0010 | Zoom no mapa do Início: botões +/−/⟲, pinça e Ctrl + rodinha; arrastar move o mapa ampliado |
-| 0011 | Limite de zonas desenhadas por limpeza, na aba Configurações do painel (padrão 3), com testes |
+| 0011 | Limite de zonas desenhadas por limpeza, na tabela de ajustes (grupo Sistema) do painel (padrão 3), com testes |
 
 A **ponte MQTT** ([h50console/mqtt_bridge.py](h50console/mqtt_bridge.py), opção `mqtt` do app) é código deste
 repositório, não um patch: ela só usa a API HTTP do painel, então não conflita com atualizações do original. Os testes
