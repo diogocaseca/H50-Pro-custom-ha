@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- **Zoom no mapa do Início** (patch 0010): botões **+**, **−** e **⟲** sobre o mapa, pinça com dois dedos no celular e
+  **Ctrl + rodinha** no computador, até 5×. Com zoom, arrastar move o mapa; no modo "Desenhar zona", um dedo desenha e
+  dois movem e ampliam.
+
 ## 0.4.0
 
 - **Limpeza por zona** (patch 0009): **Desenhar zona** no mapa do Início (até 10 retângulos por limpeza) e **zonas com

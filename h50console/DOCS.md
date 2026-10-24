@@ -106,6 +106,8 @@ conta Xiaomi conectada; a limpeza em si vai pela rede local.
 
 - Cada lado precisa ter ao menos 0,3 m. Abaixo de 0,7 m o painel avisa: o robô pode recusar zonas pequenas.
 - Zonas e cômodos não se misturam: escolher um cômodo desfaz as zonas e vice-versa.
+- **Zoom:** botões **+**, **−** e **⟲** no canto do mapa, pinça com dois dedos ou **Ctrl + rodinha**. Com zoom,
+  arrastar move o mapa; no modo "Desenhar zona", um dedo desenha e dois movem e ampliam.
 
 **Zonas com nome** (só o administrador salva e apaga): depois de desenhar, **Salvar zona** pede um nome. As zonas salvas
 aparecem no menu **Área**, junto dos cômodos, para todos que podem comandar o robô. O nome não pode repetir o de outra
