@@ -24,7 +24,7 @@ h50console/                # o app (slug h50console); é o contexto de build do 
   config.yaml build.yaml   # build.yaml → args.H50_COMMIT: commit do original usado no build
   Dockerfile  run.py      # run.py lê as opções; com mqtt ligado, sobe o painel e a ponte
   mqtt_bridge.py tests/    # ponte MQTT (discovery) e os testes dela
-  patches/0001-…0009-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
+  patches/0001-…0010-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
 tools/update-upstream.sh   # move os patches para um commit novo do original
 ```
 
@@ -49,6 +49,7 @@ Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta ex
 | 0007 | Rotina personalizada aplica o modo de limpeza da rotina (2/4) antes de limpar os cômodos; recusa rotina com modos diferentes por cômodo, com testes |
 | 0008 | Teste da limpeza por zona (ação 2/37, formato do xiaomi-vac nos modelos irmãos) com as zonas capturadas do app Xiaomi Home, com testes |
 | 0009 | Limpeza por zona: desenhar zonas no mapa, zonas com nome (só admin salva e apaga) e rotinas por zonas com as zonas aprendidas do app Xiaomi Home; tira o cartão de teste, com testes |
+| 0010 | Zoom no mapa do Início: botões +/−/⟲, pinça e Ctrl + rodinha; arrastar move o mapa ampliado |
 
 A **ponte MQTT** ([h50console/mqtt_bridge.py](h50console/mqtt_bridge.py), opção `mqtt` do app) é código deste
 repositório, não um patch: ela só usa a API HTTP do painel, então não conflita com atualizações do original. Os testes
