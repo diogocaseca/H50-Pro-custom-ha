@@ -46,7 +46,6 @@ histórico de limpezas.
 | `cloud_region` | `auto` | Servidor da nuvem Xiaomi em que o robô está: `us` (EUA, onde costumam ficar as contas do Brasil), `de` (Europa), `sg` (Singapura), `cn` (China), `ru` (Rússia), `i2` (Índia). Veja abaixo |
 | `admins` | vazio | Logins de usuários do HA que entram como **administrador** no painel, além dos administradores do HA. Veja [Quem pode fazer o quê](#quem-pode-fazer-o-quê) |
 | `others` | `operator` | Perfil dos demais usuários do HA: `operator` (comanda o robô sem mexer em configurações) ou `viewer` (só consulta) |
-| `zone_limit` | `3` | Quantas zonas dá para desenhar no mapa por limpeza (e salvar numa zona com nome), de 1 a 10. Rotinas do app Xiaomi Home e zonas já salvas não são afetadas |
 | `mqtt` | desligado | Integração MQTT: cria o robô como dispositivo do HA. Veja [Integração MQTT](#integração-mqtt-robô-como-dispositivo-do-ha) |
 | `mqtt_host` | vazio | Endereço do broker. Vazio = app Mosquitto broker do HA. Só para broker externo |
 | `mqtt_port` | `1883` | Porta do broker |
@@ -101,12 +100,15 @@ usuário com que você entrou.
 ## Limpeza por zona
 
 No **Início**, toque em **Desenhar zona** (abaixo do mapa) e arraste no mapa para fazer um retângulo. Dá para desenhar
-até 3 zonas (opção `zone_limit`, até 10); cada uma aparece numerada, com o tamanho em metros, e o **✕** tira uma
+até 3 zonas (ajustável de 1 a 10, ver abaixo); cada uma aparece numerada, com o tamanho em metros, e o **✕** tira uma
 delas. Toque em **Concluir** e depois em **Iniciar limpeza**. A limpeza usa os **Modos** atuais. O mapa vem da nuvem,
 então desenhar zonas exige a conta Xiaomi conectada; a limpeza em si vai pela rede local.
 
 - Cada lado precisa ter ao menos 0,3 m. Abaixo de 0,7 m o painel avisa: o robô pode recusar zonas pequenas.
 - Zonas e cômodos não se misturam: escolher um cômodo desfaz as zonas e vice-versa.
+- **Limite de zonas:** o administrador muda na aba **Configurações** do painel, cartão **Limpeza por zona** (1 a 10,
+  padrão 3). Vale para desenhar e para salvar zonas; as rotinas do app Xiaomi Home e as zonas já salvas não são
+  afetadas.
 - **Zoom:** botões **+**, **−** e **⟲** no canto do mapa, pinça com dois dedos ou **Ctrl + rodinha**. Com zoom,
   arrastar move o mapa; no modo "Desenhar zona", um dedo desenha e dois movem e ampliam.
 

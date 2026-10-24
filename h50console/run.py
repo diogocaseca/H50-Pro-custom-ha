@@ -47,7 +47,6 @@ env.update({
     # perfis pelo usuário do HA (panel_admin: false): admin do HA ou listado em admins = administrador; demais = others
     "H50_INGRESS_ADMINS": ",".join(str(a).strip() for a in (opts.get("admins") or []) if str(a).strip()),
     "H50_INGRESS_OTHERS": str(opts.get("others") or "operator"),
-    "H50_ZONE_LIMIT": str(opts.get("zone_limit") or 3),
 })
 if not opts.get("direct_access"):
     env["H50_INGRESS_ONLY"] = "true"   # rede do host: sem isto a porta 8050 ficaria aberta na LAN

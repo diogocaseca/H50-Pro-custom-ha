@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3
+
+- O **limite de zonas desenhadas** saiu da configuração do app e foi para a aba **Configurações** do painel, cartão
+  **Limpeza por zona** (padrão 3, de 1 a 10, só o administrador muda). A opção `zone_limit` do app deixa de existir.
+
 ## 0.4.2
 
 - Nova opção **`zone_limit`** (padrão 3, de 1 a 10): quantas zonas dá para desenhar no mapa por limpeza e salvar
