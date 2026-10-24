@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- O limite de zonas desenhadas saiu do cartão próprio e foi para a **tabela de ajustes** da aba Configurações, grupo
+  **Sistema** (item "Limite de zonas desenhadas por limpeza"). O valor salvo continua valendo.
+
 ## 0.4.3
 
 - O **limite de zonas desenhadas** saiu da configuração do app e foi para a aba **Configurações** do painel, cartão

@@ -106,9 +106,9 @@ então desenhar zonas exige a conta Xiaomi conectada; a limpeza em si vai pela r
 
 - Cada lado precisa ter ao menos 0,3 m. Abaixo de 0,7 m o painel avisa: o robô pode recusar zonas pequenas.
 - Zonas e cômodos não se misturam: escolher um cômodo desfaz as zonas e vice-versa.
-- **Limite de zonas:** o administrador muda na aba **Configurações** do painel, cartão **Limpeza por zona** (1 a 10,
-  padrão 3). Vale para desenhar e para salvar zonas; as rotinas do app Xiaomi Home e as zonas já salvas não são
-  afetadas.
+- **Limite de zonas:** o administrador muda na aba **Configurações** do painel, na tabela de ajustes, grupo
+  **Sistema**, item **Limite de zonas desenhadas por limpeza** (1 a 10, padrão 3). Vale para desenhar e para salvar
+  zonas; as rotinas do app Xiaomi Home e as zonas já salvas não são afetadas.
 - **Zoom:** botões **+**, **−** e **⟲** no canto do mapa, pinça com dois dedos ou **Ctrl + rodinha**. Com zoom,
   arrastar move o mapa; no modo "Desenhar zona", um dedo desenha e dois movem e ampliam.
 
