@@ -1,0 +1,260 @@
+From f1503958c358870c71355e1aecaaa0316cee83fe Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Sat, 24 Oct 2026 00:29:10 -0300
+Subject: [PATCH] =?UTF-8?q?Limite=20de=20zonas=20desenhadas=20na=20aba=20C?=
+ =?UTF-8?q?onfigura=C3=A7=C3=B5es?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Quantos retângulos dá para desenhar por limpeza ou por zona salva, de 1 a
+10 (padrão 3), guardado por robô. Fica num cartão "Limpeza por zona" na
+aba Configurações (só o administrador vê e muda). Vale na tela (Desenhar
+zona), ao salvar uma zona e em POST /api/clean/zones com coordenadas.
+Rotinas do app Xiaomi Home e zonas salvas antes de baixar o limite
+continuam rodando.
+
+API: GET /api/zones/limit (todos os perfis) e PUT /api/zones/limit
+(administrador).
+---
+ h50console/static/app.js     | 18 ++++++++++++++----
+ h50console/static/index.html |  9 +++++++++
+ h50console/static/style.css  |  4 ++--
+ h50console/web.py            | 19 ++++++++++++++++++-
+ h50console/zones.py          | 24 ++++++++++++++++++++++++
+ tests/test_auth.py           |  3 ++-
+ tests/test_web.py            | 12 ++++++++++++
+ 7 files changed, 81 insertions(+), 8 deletions(-)
+
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index 5e90819..a5d5ae1 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -160,9 +160,10 @@
+ 
+   let roomsCache = null;
+   async function renderHomeLists() {
+-    const [custom, sched, zones] = await Promise.all([api("GET", "/api/custom"), api("GET", "/api/schedules"),
+-      api("GET", "/api/zones").catch(() => [])]);
++    const [custom, sched, zones, limit] = await Promise.all([api("GET", "/api/custom"), api("GET", "/api/schedules"),
++      api("GET", "/api/zones").catch(() => []), api("GET", "/api/zones/limit").catch(() => ({ limit: 3 }))]);
+     savedZones = zones;
++    zoneLimit = limit.limit;
+     if (zoneId && !savedZones.some((z) => z.id === zoneId)) { zoneSel = []; zoneId = null; toggleRefresh(); }
+     $("#custom-list").replaceChildren(...(custom.length ? custom.map((c) => {
+       const play = el("button", { className: "play", title: c.runnable ? `Executar ${c.name}` : c.reason, textContent: "▶",
+@@ -229,12 +230,13 @@
+   }
+ 
+   // ---- zonas: desenhar no mapa, salvar com nome (admin) e limpar ----------------------------------------------
+-  const ZONE_MIN = 300, ZONE_WARN = 700, ZONE_MAX = 10;
++  const ZONE_MIN = 300, ZONE_WARN = 700;
++  let zoneLimit = 3;                                        // aba Configurações (GET /api/zones/limit)
+   function addZone(rect) {
+     const [x1, y1, x2, y2] = rect, w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+     if (Math.min(w, h) < ZONE_MIN) return toast("Zona pequena demais: cada lado precisa ter ao menos 0,3 m.", true);
+     if (zoneId) { zoneSel = []; zoneId = null; }                // editar uma zona salva vira uma seleção nova
+-    if (zoneSel.length >= ZONE_MAX) return toast(`No máximo ${ZONE_MAX} zonas por limpeza.`, true);
++    if (zoneSel.length >= zoneLimit) return toast(`No máximo ${zoneLimit} zona(s) por limpeza (limite da aba Configurações).`, true);
+     areaSel.clear();
+     zoneSel.push(rect);
+     if (Math.min(w, h) < ZONE_WARN) toast("Zona com menos de 0,7 m de lado: o robô pode recusar.");
+@@ -628,6 +630,14 @@
+ 
+     async configuracoes() {
+       window.H50?.renderNotify?.();
++      if (!document.body.classList.contains("operator") && !document.body.classList.contains("viewer")) {
++        const inp = $("#zone-limit");
++        if (document.activeElement !== inp) inp.value = (await api("GET", "/api/zones/limit")).limit;
++        $("#zone-limit-save").onclick = () => run("Limite de zonas", async () => {
++          zoneLimit = (await api("PUT", "/api/zones/limit", { limit: Number(inp.value) })).limit;
++          inp.value = zoneLimit;
++        });
++      }
+       const host = $("#t-settings");
+       if (host.contains(document.activeElement) && document.activeElement.tagName !== "BODY") return;
+       const items = await loadSettings();
+diff --git a/h50console/static/index.html b/h50console/static/index.html
+index 04848e2..223056c 100644
+--- a/h50console/static/index.html
++++ b/h50console/static/index.html
+@@ -156,6 +156,15 @@
+         <button id="viewer-set">Definir senha</button><button id="viewer-off">Desligar</button></div>
+     </div>
+     <div class="card" id="notify-card" hidden></div>
++    <div class="card" id="zone-limit-card">
++      <div class="card-label">Limpeza por zona</div>
++      <div class="bar">
++        <label>Limite de zonas desenhadas por limpeza <input id="zone-limit" type="number" min="1" max="10" style="width:4em"></label>
++        <button id="zone-limit-save">Salvar</button>
++      </div>
++      <p class="muted small">Vale para "Desenhar zona" no mapa do Início e para salvar uma zona com nome (1 a 10). As rotinas do app
++        Xiaomi Home e as zonas já salvas não são afetadas.</p>
++    </div>
+     <div id="t-settings"></div>
+   </section>
+ 
+diff --git a/h50console/static/style.css b/h50console/static/style.css
+index 627411c..f29fe65 100644
+--- a/h50console/static/style.css
++++ b/h50console/static/style.css
+@@ -202,13 +202,13 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .4); }
+ body.viewer #tabs a[href="#robos"], body.viewer #tabs a[href="#diagnostico"], body.viewer #tabs a[href="#manutencao"],
+ body.viewer #tabs a[href="#laboratorio"], body.viewer .home-side, body.viewer #hist-sync, body.viewer #t-consumables button,
+ body.viewer #t-settings, body.viewer #notify-card, body.viewer #viewer-card, body.viewer #sec-pw, body.viewer #sec-all,
+-body.viewer #map-edit, body.viewer #zone-tools, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
++body.viewer #map-edit, body.viewer #zone-tools, body.viewer #zone-limit-card, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
+ body.viewer .home { grid-template-columns: 1fr; }
+ /* operador (Ingress do HA): comanda o robô e escolhe os modos; o resto é do administrador */
+ body.operator #tabs a[href="#robos"], body.operator #tabs a[href="#diagnostico"], body.operator #tabs a[href="#manutencao"],
+ body.operator #tabs a[href="#laboratorio"], body.operator #hist-sync, body.operator #t-consumables button,
+ body.operator #t-settings, body.operator #notify-card, body.operator #viewer-card, body.operator #sec-pw,
+-body.operator #sec-all, body.operator #map-edit, body.operator #zone-save, body.operator .zone-dels, body.operator #onboarding, body.operator #qr-start,
++body.operator #sec-all, body.operator #map-edit, body.operator #zone-save, body.operator .zone-dels, body.operator #zone-limit-card, body.operator #onboarding, body.operator #qr-start,
+ body.operator #cloud-connect .bar { display: none; }
+ .badge-viewer { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2, rgba(128,128,128,.18)); }
+ td button { white-space: nowrap; }
+diff --git a/h50console/web.py b/h50console/web.py
+index 0645c25..9533bf8 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -47,7 +47,7 @@ MAX_JSON = 1024 * 1024            # nenhum corpo JSON legítimo do app passa dis
+ VIEWER_GET = re.compile(
+     r"/api/(app|robots|stream|cloud/status)"
+     r"|/api/r/[\w-]+/(stream|health|state|rooms|custom|furniture|settings|consumables|history|history/path|schedules"
+-    r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status|zones)")
++    r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status|zones|zones/limit)")
+ # único POST do visualizador: atualizar o mapa a partir da nuvem (só baixa; não mexe no robô)
+ VIEWER_POST = re.compile(r"/api/r/[\w-]+/cloud/map")
+ # perfil operador (Ingress do HA, usuários que não são administradores): o que o visualizador vê, mais comandar o robô e
+@@ -101,6 +101,8 @@ class App:
+             ("POST", r"/api/clean/custom/(\d+)", self.clean_custom),
+             ("POST", r"/api/clean/zones", self.clean_zones),
+             ("GET", r"/api/zones", self.zones_list),
++            ("GET", r"/api/zones/limit", self.zone_limit),
++            ("PUT", r"/api/zones/limit", self.put_zone_limit),
+             ("POST", r"/api/zones", self.zone_add),
+             ("PUT", r"/api/zones/([0-9a-f]{8})", self.zone_rename),
+             ("DELETE", r"/api/zones/([0-9a-f]{8})", self.zone_delete),
+@@ -515,6 +517,10 @@ class App:
+             rects = zone["zones"]
+         else:
+             rects = body.get("zones")
++            try:
++                zones.check_count(self.store, rects)              # zonas desenhadas: limite da aba Configurações
++            except zones.ZoneError as ex:
++                raise ApiError(400, str(ex)) from ex
+         decoders.zone_param(rects)                                # valida antes de qualquer coisa (400)
+         return self.gw.clean_zones(rects)
+ 
+@@ -528,6 +534,17 @@ class App:
+     def zones_list(self, **_):
+         return zones.saved(self.store)
+ 
++    def zone_limit(self, **_):
++        return {"limit": zones.draw_limit(self.store)}
++
++    def put_zone_limit(self, body, **_):
++        try:
++            limit = zones.set_draw_limit(self.store, (body or {}).get("limit"))
++        except zones.ZoneError as ex:
++            raise ApiError(400, str(ex)) from ex
++        self._zones_changed()
++        return {"limit": limit}
++
+     def zone_add(self, body, **_):
+         body = body or {}
+         try:
+diff --git a/h50console/zones.py b/h50console/zones.py
+index 998c0af..4912966 100644
+--- a/h50console/zones.py
++++ b/h50console/zones.py
+@@ -14,10 +14,33 @@ from .store import Store, iso
+ 
+ SAVED_KEY = "zones_saved"            # [{"id", "name", "zones": [[x1,y1,x2,y2], ...]}]
+ LEARNED_KEY = "routine_zones"        # {"<id da rotina>": {"name", "zones", "ts"}}
++LIMIT_KEY = "zone_limit"             # quantos retângulos dá para desenhar por limpeza (aba Configurações)
++LIMIT_DEFAULT = 3
+ MAX_SAVED = 30
+ MAX_NAME = 40
+ 
+ 
++def draw_limit(store: Store) -> int:
++    """Limite de zonas desenhadas por limpeza e por zona salva (1 a 10). Não vale para as rotinas do app Xiaomi Home
++    nem para zonas salvas antes de baixar o limite."""
++    try:
++        return min(decoders.ZONE_MAX_COUNT, max(1, int(store.get_setting(LIMIT_KEY, LIMIT_DEFAULT))))
++    except (TypeError, ValueError):
++        return LIMIT_DEFAULT
++
++
++def set_draw_limit(store: Store, value) -> int:
++    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= decoders.ZONE_MAX_COUNT:
++        raise ZoneError(f"o limite precisa ser um número de 1 a {decoders.ZONE_MAX_COUNT}")
++    store.set_setting(LIMIT_KEY, value)
++    return value
++
++
++def check_count(store: Store, rects) -> None:
++    if isinstance(rects, list) and len(rects) > draw_limit(store):
++        raise ZoneError(f"no máximo {draw_limit(store)} zona(s) por limpeza (limite da aba Configurações)")
++
++
+ class ZoneError(ValueError):
+     """Pedido inválido (vira 400) ou conflito de nome (vira 409, ver `conflict`)."""
+ 
+@@ -107,6 +130,7 @@ def check_name(name, store: Store, routine_names: list[str], ignore_id: str | No
+ def add(store: Store, name, rects, routine_names: list[str]) -> dict:
+     name = check_name(name, store, routine_names)
+     decoders.zone_param(rects)                                       # valida (ValueError -> 400)
++    check_count(store, rects)
+     zones = saved(store)
+     if len(zones) >= MAX_SAVED:
+         raise ZoneError(f"limite de {MAX_SAVED} zonas salvas")
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+index 63e15c7..95189c5 100644
+--- a/tests/test_auth.py
++++ b/tests/test_auth.py
+@@ -543,7 +543,7 @@ class IngressRoles(unittest.TestCase):
+                    ("POST", "/api/r/sala/map/edit/save"), ("PUT", "/api/r/sala/app/name"), ("GET", "/api/r/sala/commands"),
+                    ("POST", "/api/r/sala/actions/start/../../robots"), ("POST", "/api/auth/viewer"),
+                    ("POST", "/api/auth/password"), ("POST", "/api/r/sala/zones"), ("PUT", "/api/r/sala/zones/abcd1234"),
+-                   ("DELETE", "/api/r/sala/zones/abcd1234")]
++                   ("DELETE", "/api/r/sala/zones/abcd1234"), ("PUT", "/api/r/sala/zones/limit")]
+         for method, path in allowed:
+             st, body = self.req(method, path, user="maria", body={} if method != "GET" else None)
+             self.assertNotEqual(st, 403, (method, path, body))
+@@ -560,6 +560,7 @@ class IngressRoles(unittest.TestCase):
+         self.assertEqual(self.req("POST", "/api/r/sala/actions/start", user="maria", body={})[0], 403)
+         self.assertEqual(self.req("POST", "/api/r/sala/clean/zones", user="maria", body={})[0], 403)
+         self.assertNotEqual(self.req("GET", "/api/r/sala/zones", user="maria")[0], 403)
++        self.assertNotEqual(self.req("GET", "/api/r/sala/zones/limit", user="maria")[0], 403)
+         self.assertEqual(self.role(user="x", groups="system-admin"), "admin")
+ 
+     def test_config(self):
+diff --git a/tests/test_web.py b/tests/test_web.py
+index 6b00252..185009c 100644
+--- a/tests/test_web.py
++++ b/tests/test_web.py
+@@ -264,6 +264,18 @@ class WebTests(unittest.TestCase):
+             self.assertEqual(self.call("PUT", f"/api/zones/{z['id']}", {"name": "Sala intenso"})[0], 409)
+             self.assertEqual(self.call("PUT", f"/api/zones/{z['id']}", {"name": "Sofá"})[1]["name"], "Sofá")
+             self.assertEqual([x["name"] for x in self.call("GET", "/api/zones")[1]], ["Sofá"])
++            # limite de zonas desenhadas (aba Configurações): vale para desenhar e salvar, não para o que já está salvo
++            three = [[0, 0, 900, 900], [1000, 0, 1900, 900], [2000, 0, 2900, 900], [3000, 0, 3900, 900]]
++            self.assertEqual(self.call("GET", "/api/zones/limit")[1], {"limit": 3})          # padrão
++            st, res = self.call("POST", "/api/clean/zones", {"zones": three})
++            self.assertEqual(st, 400)
++            self.assertIn("no máximo 3", res["error"])
++            self.assertEqual(self.call("PUT", "/api/zones/limit", {"limit": 2})[1], {"limit": 2})
++            self.assertEqual(self.call("POST", "/api/zones", {"name": "Três", "zones": three[:3]})[0], 400)
++            self.assertEqual(self.call("POST", "/api/clean/zones", {"zones": three[:2]})[0], 200)
++            for bad in (0, 11, "3", True, None):
++                self.assertEqual(self.call("PUT", "/api/zones/limit", {"limit": bad})[0], 400, bad)
++            self.call("PUT", "/api/zones/limit", {"limit": 3})
+             # limpar pela zona salva ou por coordenadas
+             self.fake.calls.clear()
+             self.assertEqual(self.call("POST", "/api/clean/zones", {"zone_id": z["id"]})[1]["code"], 0)
+-- 
+2.53.0
+
