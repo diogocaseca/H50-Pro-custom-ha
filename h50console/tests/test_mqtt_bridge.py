@@ -52,11 +52,19 @@ class Mapping(unittest.TestCase):
         self.assertEqual((a["clean_mode"], a["water_level"], a["suction"]), ("Aspirando e esfregando", "Nível 2", "Intenso"))
         self.assertEqual((a["clean_route"], a["clean_times"]), ("Rápido", "Duas vezes"))
         self.assertEqual(a["consumables"]["main_brush"], 90)
-        self.assertEqual((a["drying_progress"], a["drying_left"]), (35, 95))
+        self.assertEqual((a["drying_progress"], a["drying_left"], a["drying"]), (35, 95, True))
         self.assertIsNone(a["consumables"]["dust_bag"])
         idle = mb.attrs_payload({"status": 2, "values": {"2/89": -1, "3/2": 1, "2/3": 210013}})
         self.assertEqual((idle["progress"], idle["charging"], idle["fault"], idle["battery"]), (None, True, "210013", None))
         self.assertNotIn("fan_speed", mb.vacuum_payload({"status": 2, "values": {}}, []))
+
+    def test_drying(self):
+        self.assertTrue(mb.drying({"2/18": '{"mode":1,"progress":0}', "2/90": 0}))       # base secando
+        self.assertTrue(mb.drying({"2/18": '{"mode":0}', "2/90": 30}))                   # ainda faltam minutos
+        self.assertFalse(mb.drying({"2/18": '{"mode":3,"progress":50}', "2/90": 0}))     # lavando o mop
+        self.assertFalse(mb.drying({"2/18": '{"mode":0,"progress":0}', "2/90": 0}))
+        self.assertFalse(mb.drying({"2/18": "lixo", "2/90": None}))
+        self.assertFalse(mb.drying({}))
 
     def test_cleaning_session(self):
         self.assertTrue((mb.SESSION_ON | mb.SESSION_KEEP) <= set(catalog.STATUS))
@@ -93,6 +101,7 @@ class Mapping(unittest.TestCase):
         self.assertEqual(cmps["clean_mode"]["ops"][0], "Aspirando")
         d = cmps["drying_progress"]
         self.assertEqual((d["p"], d["unit_of_meas"], d["val_tpl"]), ("sensor", "%", "{{ value_json.drying_progress }}"))
+        self.assertEqual((cmps["drying"]["p"], cmps["drying"]["dev_cla"]), ("binary_sensor", "running"))
         d = cmps["drying_left"]
         self.assertEqual((d["dev_cla"], d["unit_of_meas"], d["val_tpl"]), ("duration", "min", "{{ value_json.drying_left }}"))
         s = cmps["suction"]

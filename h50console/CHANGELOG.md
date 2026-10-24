@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5
+
+- MQTT: sensor binário **Secagem em andamento**, ligado enquanto a base seca os mops e desligado quando a secagem
+  termina ou é parada. Bom para automações de "começou a secar" e "terminou de secar".
+
 ## 0.4.4
 
 - O limite de zonas desenhadas saiu do cartão próprio e foi para a **tabela de ajustes** da aba Configurações, grupo

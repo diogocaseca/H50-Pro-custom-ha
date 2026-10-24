@@ -93,6 +93,16 @@ def cleaning_session(status, previous: bool | None, progress=None) -> bool:
     return False
 
 
+def drying(values: dict) -> bool:
+    """Secagem dos mops em andamento: a base informa o modo 1 (Secando) no 2/18, ou ainda faltam minutos no 2/90."""
+    try:
+        base = json.loads(values.get("2/18") or "{}")
+    except (TypeError, ValueError):
+        base = {}
+    left = _num(values.get("2/90"))
+    return (isinstance(base, dict) and base.get("mode") == 1) or bool(left and left > 0)
+
+
 def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
@@ -121,6 +131,7 @@ def attrs_payload(state: dict, cleaning: bool = False) -> dict:
         "duration": _num(v.get("2/7")),
         "drying_progress": _num(v.get("2/88")),                                   # secagem dos mops (base)
         "drying_left": _num(v.get("2/90")),                                       # minutos restantes da secagem
+        "drying": drying(v),
         "fault": None if fault is None else ("Nenhuma" if fault == 0 else str(fault)),
         "dirty_tank_full": bool(v.get("2/97")),
         "clean_tank_empty": bool(v.get("2/98")),
@@ -193,6 +204,9 @@ def discovery(robot: dict, version: str = "", buttons: dict[str, tuple[str, str]
         "cleaning": {"p": "binary_sensor", "name": "Limpeza em andamento", "uniq_id": f"{key}_cleaning", **common,
                      "stat_t": t["attrs"], "val_tpl": "{{ 'ON' if value_json.cleaning else 'OFF' }}",
                      "dev_cla": "running", "ic": "mdi:robot-vacuum-variant"},
+        "drying": {"p": "binary_sensor", "name": "Secagem em andamento", "uniq_id": f"{key}_drying", **common,
+                   "stat_t": t["attrs"], "val_tpl": "{{ 'ON' if value_json.drying else 'OFF' }}",
+                   "dev_cla": "running", "ic": "mdi:fan"},
         "dirty_tank_full": {"p": "binary_sensor", "name": "Tanque de água suja cheio", "uniq_id": f"{key}_dirty_tank",
                             **common, "stat_t": t["attrs"], "dev_cla": "problem",
                             "val_tpl": "{{ 'ON' if value_json.dirty_tank_full else 'OFF' }}"},
