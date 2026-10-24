@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.8
+
+- MQTT: sensor **Progresso da secagem** (% da secagem dos mops na base).
+
 ## 0.3.7
 
 - Teste: cartão **Teste: limpeza por zona** no Início (administrador e operador). Lista as zonas das últimas limpezas
