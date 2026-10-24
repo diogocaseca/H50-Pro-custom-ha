@@ -22,6 +22,11 @@ configuration:
     name: Profile of the other users
     description: >-
       operator = controls the robot (cleaning, rooms, dock, modes) without changing settings; viewer = read-only.
+  zone_limit:
+    name: Drawn zone limit
+    description: >-
+      How many zones can be drawn on the map per cleaning (and saved in a named zone), from 1 to 10. Does not apply
+      to Xiaomi Home routines.
   mqtt:
     name: MQTT integration
     description: >-

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Nova opção **`zone_limit`** (padrão 3, de 1 a 10): quantas zonas dá para desenhar no mapa por limpeza e salvar
+  numa zona com nome (patch 0011). Também vale para o `clean_zones` do MQTT com coordenadas. Rotinas do app Xiaomi
+  Home e zonas já salvas não são afetadas.
+
 ## 0.4.1
 
 - **Zoom no mapa do Início** (patch 0010): botões **+**, **−** e **⟲** sobre o mapa, pinça com dois dedos no celular e

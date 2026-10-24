@@ -22,6 +22,11 @@ configuration:
     name: Perfil dos demais usuários
     description: >-
       operator = comanda o robô (limpeza, cômodos, base, modos) sem mexer em configurações; viewer = só consulta.
+  zone_limit:
+    name: Limite de zonas desenhadas
+    description: >-
+      Quantas zonas dá para desenhar no mapa por limpeza (e salvar numa zona com nome), de 1 a 10. Não vale para as
+      rotinas do app Xiaomi Home.
   mqtt:
     name: Integração MQTT
     description: >-
