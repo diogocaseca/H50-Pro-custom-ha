@@ -1,0 +1,163 @@
+From 68661f2b830bb353c922e03f4aafcae296ccf697 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Mon, 26 Oct 2026 16:35:29 -0300
+Subject: [PATCH] =?UTF-8?q?Progresso=20da=20secagem=20calculado=20pela=20d?=
+ =?UTF-8?q?ura=C3=A7=C3=A3o=20e=20minutos=20restantes?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O H50 Pro deixa o 2/88 em 0 durante a secagem e só informa os minutos
+restantes (2/90). decoders.drying_percent calcula o % com a duração
+escolhida (2/31); se o 2/88 vier preenchido, vale ele. Usado na linha
+"Progresso da secagem" do Estado e no chip "Secando" do Início.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/catalog.py    |  2 +-
+ h50console/decoders.py   | 21 +++++++++++++++++++++
+ h50console/static/app.js | 11 ++++++++++-
+ h50console/web.py        |  8 +++++++-
+ tests/test_stage1.py     | 11 +++++++++++
+ tests/test_web.py        |  8 ++++++++
+ 6 files changed, 58 insertions(+), 3 deletions(-)
+
+diff --git a/h50console/catalog.py b/h50console/catalog.py
+index 27db4af..bae3929 100644
+--- a/h50console/catalog.py
++++ b/h50console/catalog.py
+@@ -307,7 +307,7 @@ STATE_ROWS: list[tuple[str, str, str]] = [
+     ("2/40", "Limpando agora", "rooms"),
+     ("2/96", "Escova/mop em uso", "raw"),
+     ("2/18", "Base", "base"),
+-    ("2/88", "Progresso da secagem", "pct"),
++    ("2/88", "Progresso da secagem", "drying"),         # calculado com 2/31 e 2/90 (ver decoders)
+     ("2/90", "Secagem restante", "minutes"),
+     ("2/97", "Tanque de água suja cheio", "bool"),
+     ("2/98", "Tanque de água limpa vazio", "bool"),
+diff --git a/h50console/decoders.py b/h50console/decoders.py
+index a139c61..66b8391 100644
+--- a/h50console/decoders.py
++++ b/h50console/decoders.py
+@@ -97,6 +97,27 @@ def base_status(raw) -> dict:
+ 
+ # P2 resolvido em 11/10: 1 = secando (2/90 = minutos restantes), 2 = esvaziando o pó, 3 = lavando o mop
+ BASE_MODE = {0: "Ociosa", 1: "Secando", 2: "Esvaziando o pó", 3: "Lavando o mop"}
++DRYING_MINUTES = {1: 120, 2: 180, 3: 240}      # 2/31 Duração da secagem: 2 h, 3 h, 4 h
++
++
++def _num(v):
++    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
++
++
++def drying_percent(values: dict) -> int | None:
++    """% da secagem dos mops. O H50 Pro deixa o 2/88 em 0 durante a secagem e só informa os minutos restantes
++    (2/90), então a conta usa a duração escolhida (2/31). Se o 2/88 vier preenchido, vale ele. Fora da secagem: 0;
++    secando sem dados para calcular: None."""
++    reported = _num(values.get("2/88"))
++    if reported and reported > 0:
++        return reported
++    left = _num(values.get("2/90"))
++    if base_status(values.get("2/18"))["mode"] != 1 and not (left and left > 0):
++        return 0
++    total = DRYING_MINUTES.get(values.get("2/31"))
++    if not total or left is None:
++        return None
++    return max(0, min(100, round((total - left) * 100 / total)))
+ 
+ 
+ def current_config(raw) -> dict:
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index 88347df..d31e080 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -89,6 +89,13 @@
+   const V = (k) => state?.values?.[k];
+   const CLEANING = new Set([4, 10, 16, 17]), PAUSED = new Set([5, 18]), RETURNING = new Set([6, 19, 20, 21, 24]);
+   const BASE_MODE = { 0: "", 1: "Secando", 2: "Esvaziando o pó", 3: "Lavando o mop" };
++  const DRYING_MINUTES = { 1: 120, 2: 180, 3: 240 };   // 2/31 Duração da secagem
++  // % da secagem: o H50 Pro deixa o 2/88 em 0; calcula pela duração (2/31) e minutos restantes (2/90). Ver decoders.drying_percent.
++  function dryingPct() {
++    if (V("2/88") > 0) return V("2/88");
++    const total = DRYING_MINUTES[V("2/31")], left = V("2/90");
++    return total && typeof left === "number" ? Math.max(0, Math.min(100, Math.round((total - left) * 100 / total))) : null;
++  }
+ 
+   async function loadState() { state = await api("GET", "/api/state"); return state; }
+   async function loadSettings() { settings = await api("GET", "/api/settings"); return settings; }
+@@ -120,7 +127,9 @@
+       out.push(chip(`${p >= 0 ? p + " % · " : ""}${area.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} m² · ${fmtDur(V("2/7"))}`));
+     }
+     if (base.mode) {
+-      const extra = base.mode === 1 && V("2/90") ? ` · faltam ${fmtMin(V("2/90"))}` : base.progress ? ` · ${base.progress} %` : "";
++      const dry = base.mode === 1 ? dryingPct() : null;
++      const extra = base.mode === 1 && V("2/90") ? `${dry != null ? ` · ${dry} %` : ""} · faltam ${fmtMin(V("2/90"))}`
++        : base.progress ? ` · ${base.progress} %` : "";
+       out.push(chip(BASE_MODE[base.mode] + extra));
+     }
+     if (V("3/1") != null) out.push(chip(`${V("3/1")} %` + (V("3/2") === 1 ? " · Carregando" : ""), V("3/1") < 20 ? "warn" : ""));
+diff --git a/h50console/web.py b/h50console/web.py
+index 0c0ab30..793cf64 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -193,9 +193,15 @@ class App:
+             return _local(v)
+         return v
+ 
++    def _row_value(self, key: str, kind: str, snap: dict):
++        if kind == "drying":                             # depende de 2/18, 2/31 e 2/90, não só do 2/88
++            p = decoders.drying_percent(snap)
++            return "—" if p is None else f"{p} %"
++        return self._fmt(key, kind, snap.get(key))
++
+     def state(self, **_):
+         snap = self.gw.cache.snapshot()
+-        rows = [{"key": k, "label": lbl, "value": self._fmt(k, kind, snap.get(k)), "raw": snap.get(k),
++        rows = [{"key": k, "label": lbl, "value": self._row_value(k, kind, snap), "raw": snap.get(k),
+                  "changed_at": self.gw.cache.changed_at.get(k)} for k, lbl, kind in catalog.STATE_ROWS]
+         status = snap.get("2/2")
+         return {"health": self.gw.health(), "status": status, "status_label": catalog.label("2/2", status),
+diff --git a/tests/test_stage1.py b/tests/test_stage1.py
+index 978a1ec..dc4bd3c 100644
+--- a/tests/test_stage1.py
++++ b/tests/test_stage1.py
+@@ -109,6 +109,17 @@ class Decoders(unittest.TestCase):
+         self.assertEqual(decoders.current_config('{"rooms":[8],"clean_mode":3}')["rooms"], [8])
+         self.assertEqual(decoders.current_config('{"clean_mode":1}')["rooms"], [])
+ 
++    def test_drying_percent(self):
++        secando = '{"mode":1,"progress":0}'
++        # o H50 Pro deixa o 2/88 em 0: calcula pela duração (2/31 = 2 -> 3 h) e minutos restantes (2/90)
++        self.assertEqual(decoders.drying_percent({"2/18": secando, "2/88": 0, "2/31": 2, "2/90": 135}), 25)
++        self.assertEqual(decoders.drying_percent({"2/18": secando, "2/31": 1, "2/90": 0}), 100)
++        self.assertEqual(decoders.drying_percent({"2/18": "{}", "2/31": 3, "2/90": 60}), 75)   # só os minutos restantes
++        self.assertEqual(decoders.drying_percent({"2/18": secando, "2/31": 1, "2/90": 999}), 0)
++        self.assertEqual(decoders.drying_percent({"2/18": secando, "2/88": 40, "2/31": 2, "2/90": 10}), 40)  # vale o informado
++        self.assertEqual(decoders.drying_percent({"2/18": '{"mode":0}', "2/88": 0, "2/31": 2, "2/90": 0}), 0)
++        self.assertIsNone(decoders.drying_percent({"2/18": secando, "2/31": 9, "2/90": 30}))
++
+ 
+ class Batching(unittest.TestCase):
+     def test_plan_respects_budget(self):
+diff --git a/tests/test_web.py b/tests/test_web.py
+index bd3bc66..8032af0 100644
+--- a/tests/test_web.py
++++ b/tests/test_web.py
+@@ -162,6 +162,14 @@ class WebTests(unittest.TestCase):
+         self.assertEqual(d["status_label"], "Carregando")
+         rows = {r["key"]: r for r in d["rows"]}
+         self.assertEqual(rows["2/6"]["value"], "0,87 m²")   # 2/6 = 87 no fixture
++        old = {k: self.gw.cache.get(k) for k in ("2/18", "2/31", "2/88", "2/90")}
++        try:
++            self.gw.cache.update({"2/18": '{"mode":1,"progress":0}', "2/31": 1, "2/88": 0, "2/90": 30})
++            rows = {r["key"]: r for r in self.call("GET", "/api/state")[1]["rows"]}
++            self.assertEqual(rows["2/88"]["value"], "75 %")       # 2 h de secagem, faltam 30 min
++            self.assertEqual(rows["2/88"]["raw"], 0)
++        finally:
++            self.gw.cache.update(old)
+ 
+     def test_settings_and_put(self):
+         _, items = self.call("GET", "/api/settings")
+-- 
+2.53.0
+
