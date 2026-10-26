@@ -156,7 +156,7 @@ comandos da aba **Diagnóstico**.
 | Entidade | O que é |
 |---|---|
 | Aspirador (`vacuum`) | Estado (limpando, na base, pausado, voltando, parado, erro), iniciar/continuar, pausar, parar, voltar à base, localizar, limpeza pontual, potência de sucção e limpeza por cômodo |
-| Bateria, Status, Progresso da limpeza, Área limpa, Tempo de limpeza, Progresso da secagem, Secagem restante, Falha | Sensores. Progresso da secagem: % da secagem dos mops na base; Secagem restante: minutos que faltam (os dois ficam em 0 quando não está secando) |
+| Bateria, Status, Progresso da limpeza, Área limpa, Tempo de limpeza, Progresso da secagem, Secagem restante, Falha | Sensores. Progresso da secagem: % da secagem dos mops na base, calculado pela duração da secagem (ajuste 2 h/3 h/4 h) e pelos minutos restantes; Secagem restante: minutos que faltam (os dois ficam em 0 quando não está secando) |
 | Carregando, Tanque de água suja cheio, Tanque de água limpa vazio | Sensores binários |
 | Limpeza em andamento | Sensor binário: **ligado** do início ao fim da limpeza, inclusive pausas e idas à base no meio dela (lavar o mop, recarregar para continuar); **desliga** quando o robô volta à base no fim, ou ao parar ou mandar voltar |
 | Secagem em andamento | Sensor binário: **ligado** enquanto a base seca os mops; **desliga** quando a secagem termina ou é parada |

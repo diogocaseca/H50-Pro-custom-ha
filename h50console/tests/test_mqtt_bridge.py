@@ -66,6 +66,17 @@ class Mapping(unittest.TestCase):
         self.assertFalse(mb.drying({"2/18": "lixo", "2/90": None}))
         self.assertFalse(mb.drying({}))
 
+    def test_drying_percent(self):
+        self.assertEqual({c: f"{m // 60} h" for c, m in mb.DRY_MINUTES.items()}, catalog.ENUM_PT["2/31"])
+        dry = {"2/18": '{"mode":1,"progress":0}', "2/88": 0}
+        self.assertEqual(mb.drying_percent({**dry, "2/31": 2, "2/90": 45}), 75)          # 3 h, faltam 45 min
+        self.assertEqual(mb.drying_percent({**dry, "2/31": 1, "2/90": 120}), 0)          # acabou de começar
+        self.assertEqual(mb.drying_percent({**dry, "2/31": 1, "2/90": 0}), 100)
+        self.assertEqual(mb.drying_percent({**dry, "2/31": 1, "2/90": 300}), 0)          # mudou a duração no meio
+        self.assertEqual(mb.drying_percent({**dry, "2/88": 40, "2/31": 1, "2/90": 100}), 40)   # 2/88 preenchido vale
+        self.assertIsNone(mb.drying_percent({**dry, "2/90": 30}))                        # sem a duração
+        self.assertEqual(mb.drying_percent({"2/18": '{"mode":0}', "2/88": 0, "2/90": 0, "2/31": 1}), 0)
+
     def test_cleaning_session(self):
         self.assertTrue((mb.SESSION_ON | mb.SESSION_KEEP) <= set(catalog.STATUS))
         self.assertFalse(mb.SESSION_ON & mb.SESSION_KEEP)

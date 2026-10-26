@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6
+
+- Correção: o sensor **Progresso da secagem** ficava em 0 %. O H50 Pro não preenche a porcentagem da secagem (2/88);
+  agora ela é calculada pela **Duração da secagem** (2 h, 3 h ou 4 h) e pelos **minutos restantes**. Se o robô
+  passar a informar a porcentagem, vale a dele.
+
 ## 0.4.5
 
 - MQTT: sensor binário **Secagem em andamento**, ligado enquanto a base seca os mops e desligado quando a secagem
