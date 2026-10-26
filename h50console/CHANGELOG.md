@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.7
+
+- Painel: a linha **Progresso da secagem** do Estado do robô e o aviso **Secando** do Início mostram a porcentagem
+  calculada pela duração e pelos minutos restantes, como o sensor do MQTT (antes ficavam em 0 %).
+
 ## 0.4.6
 
 - Correção: o sensor **Progresso da secagem** ficava em 0 %. O H50 Pro não preenche a porcentagem da secagem (2/88);
