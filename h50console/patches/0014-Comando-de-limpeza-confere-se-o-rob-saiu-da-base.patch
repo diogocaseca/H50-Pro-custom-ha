@@ -1,0 +1,243 @@
+From 3e1a7bb7db9064a9393748cd83e20b61946add4c Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Mon, 26 Oct 2026 22:51:42 -0300
+Subject: [PATCH 14/14] =?UTF-8?q?Comando=20de=20limpeza:=20confere=20se=20?=
+ =?UTF-8?q?o=20rob=C3=B4=20saiu=20da=20base?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Depois de um comando de limpeza aceito (cômodos, zonas, rotina, iniciar,
+aspirar, passar pano…), o Gateway espera o robô sair da base: o poller lê
+o grupo rápido a cada 5 s e confere o status a cada ciclo. Qualquer
+status ativo (limpando, lavando o mop antes de sair, trocando de tarefa)
+confirma. Sem sair em 60 s: aviso no log, coluna confirmed = 0 no
+command_log e evento "command_check" {command, via, ok}, que o painel
+mostra como aviso ("aceitou o comando (via nuvem) mas não saiu da base").
+A tabela de comandos do Diagnóstico ganha a coluna Confirmado.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/gateway.py    | 39 ++++++++++++++++++++++++++++++++++-----
+ h50console/poller.py     |  6 ++++--
+ h50console/static/app.js |  7 +++++++
+ h50console/store.py      |  7 +++++++
+ tests/test_stage23.py    | 29 +++++++++++++++++++++++++++++
+ 5 files changed, 81 insertions(+), 7 deletions(-)
+
+diff --git a/h50console/gateway.py b/h50console/gateway.py
+index 7241e87..08f631d 100644
+--- a/h50console/gateway.py
++++ b/h50console/gateway.py
+@@ -7,6 +7,7 @@
+ 
+ from __future__ import annotations
+ 
++import logging
+ import threading
+ import time
+ from collections.abc import Callable
+@@ -17,6 +18,9 @@ from .events import EventBus
+ from .miio import MiioError
+ from .store import Store, iso
+ 
++log = logging.getLogger(__name__)
++START_CONFIRM_S = 60      # depois de um comando de limpeza aceito, espera o robô sair da base por até este tempo
++
+ 
+ class CommandBlocked(Exception):
+     """Comando recusado pelo estado atual do robô (ex.: base trabalhando)."""
+@@ -90,6 +94,8 @@ class Gateway:
+         self.last_ok: str | None = None
+         self.last_latency_ms: int | None = None
+         self.poke = threading.Event()         # acorda o poller após um comando
++        self.clock = time.monotonic
++        self.pending_start: dict | None = None   # comando de limpeza aceito, esperando o robô sair da base
+ 
+     # -- núcleo -------------------------------------------------------------------
+     def _call(self, fn: Callable, *args, high: bool):
+@@ -143,7 +149,8 @@ class Gateway:
+             wake()
+         return fn(*args)
+ 
+-    def _command(self, label: str, params, fn: Callable, *args, source: str = "ui", reread: list[str] = ()):
++    def _command(self, label: str, params, fn: Callable, *args, source: str = "ui", reread: list[str] = (),
++                 leaves_base: bool = False):
+         t0 = time.perf_counter()
+         code, err, res = None, None, None
+         try:
+@@ -160,10 +167,31 @@ class Gateway:
+             raise
+         finally:
+             via = self.via
+-            self.store.log_command(source, label, params, code, int((time.perf_counter() - t0) * 1000), err, via)
++            cid = self.store.log_command(source, label, params, code, int((time.perf_counter() - t0) * 1000), err, via)
++            if leaves_base and err is None and code == 0:
++                self.pending_start = {"id": cid, "command": label, "via": via, "since": self.clock()}
+             self.bus.publish("command", {"command": label, "code": code, "error": err, "via": via})
+             self.poke.set()
+ 
++    def check_start_confirmed(self) -> None:
++        """Chamado pelo poller a cada ciclo: o robô saiu da base depois do último comando de limpeza aceito?
++
++        A nuvem já aceitou comando (code 0) que não chegou ao robô; sem esta conferência parece que deu certo.
++        """
++        p = self.pending_start
++        if p is None:
++            return
++        if self.cache.get("2/2") in catalog.ACTIVE_STATUS:     # limpando, lavando o mop antes de sair, trocando de tarefa…
++            ok = True
++        elif self.clock() - p["since"] >= START_CONFIRM_S:
++            ok = False
++            log.warning("o robô aceitou %s (via %s) mas não saiu da base em %s s", p["command"], p["via"], START_CONFIRM_S)
++        else:
++            return
++        self.pending_start = None
++        self.store.confirm_command(p["id"], ok)
++        self.bus.publish("command_check", {"command": p["command"], "via": p["via"], "ok": ok})
++
+     def check_start(self) -> None:
+         """Levanta CommandBlocked se o robô não pode sair da base agora (antes de mudar ajustes para uma limpeza)."""
+         self._check_start("start")
+@@ -173,15 +201,16 @@ class Gateway:
+         if name not in catalog.SIMPLE_ACTIONS:
+             raise ValueError(f"ação desconhecida: {name}")
+         self._check_start(name)
+-        return self._command(f"run:{name}", None, self.dev.run, name, source=source)
++        return self._command(f"run:{name}", None, self.dev.run, name, source=source,
++                             leaves_base=name in catalog.LEAVES_BASE)
+ 
+     def clean_rooms(self, ids: list[int], source: str = "ui"):
+         self._check_start("start")
+-        return self._command("action:2/16", ids, self.dev.clean_rooms, ids, source=source)
++        return self._command("action:2/16", ids, self.dev.clean_rooms, ids, source=source, leaves_base=True)
+ 
+     def clean_zones(self, zones: list, source: str = "ui"):
+         self._check_start("start")
+-        return self._command("action:2/37", zones, self.dev.clean_zones, zones, source=source)
++        return self._command("action:2/37", zones, self.dev.clean_zones, zones, source=source, leaves_base=True)
+ 
+     def set(self, key: str, value, source: str = "ui"):
+         """Grava uma prop e relê para confirmar (o robô pode ajustar o valor).
+diff --git a/h50console/poller.py b/h50console/poller.py
+index 4f42c61..c9dd268 100644
+--- a/h50console/poller.py
++++ b/h50console/poller.py
+@@ -73,6 +73,7 @@ class Poller:
+         try:
+             changes = self.gw.read(keys)
+         except MiioError as ex:
++            self.gw.check_start_confirmed()                # sem resposta nenhuma também conta o prazo
+             wait = min(MAX_BACKOFF, 10 * 2 ** (self.gw.fails - 1))
+             log.warning("robô sem resposta (%s falhas): %s; nova tentativa em %ss", self.gw.fails, ex, wait)
+             for g in due:
+@@ -83,13 +84,14 @@ class Poller:
+             self.store.save_changes(changes)
+             self.gw.bus.publish("state", {"changes": {k: v[1] for k, v in changes.items()}})
+         self._side_effects(changes, due)
++        self.gw.check_start_confirmed()
+ 
+         mode = 0 if self.active() else 1
+         factor = 3 if self.gw.via == "cloud" else 1       # a nuvem é mais lenta e tem limite de uso
+         for g in due:
+             self.next_due[g] = now + catalog.POLL_GROUPS[g][1][mode] * factor
+-        # se o robô acabou de ficar ativo, o grupo rápido passa a valer o intervalo curto já
+-        if mode == 0:
++        # robô ativo, ou esperando ele sair da base depois de um comando: o grupo rápido vale o intervalo curto
++        if mode == 0 or self.gw.pending_start:
+             self.next_due["fast"] = min(self.next_due["fast"], now + catalog.POLL_GROUPS["fast"][1][0] * factor)
+         return max(0.5, min(self.next_due.values()) - now)
+ 
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index f06b377..4e69275 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -683,6 +683,7 @@
+         { key: "result_code", label: "Código" },
+         { key: "latency_ms", label: "ms", num: true },
+         { key: "via", label: "Via", render: (r) => ({ lan: "rede local", cloud: "nuvem" })[r.via] || "—" },
++        { key: "confirmed", label: "Confirmado", render: (r) => r.confirmed == null ? "—" : r.confirmed ? "sim" : "não" },
+         { key: "error", label: "Erro" },
+         { key: "source", label: "Origem" },
+       ], cmds);
+@@ -750,6 +751,12 @@
+     es.addEventListener("mapdata", async () => { mapData = await api("GET", "/api/map").catch(() => mapData); if (current() === "inicio" && mapData) drawMap(); });
+     for (const ev of ["online", "offline"]) es.addEventListener(ev, async () => { await loadState().catch(() => {}); renderHeader(); });
+     es.addEventListener("command", () => { if (current() === "diagnostico") refresh(); });
++    // comando de limpeza aceito: o servidor confere se o robô saiu da base (a nuvem já aceitou comando que não chegou)
++    es.addEventListener("command_check", (e) => {
++      const d = JSON.parse(e.data || "{}");
++      if (!d.ok) toast(`O robô aceitou o comando${d.via === "cloud" ? " (via nuvem)" : ""} mas não saiu da base em 1 minuto.`, true);
++      if (current() === "diagnostico") refresh();
++    });
+     es.addEventListener("zones", () => { if (current() === "inicio") renderHomeLists(); });
+     es.addEventListener("cleaning", () => { if (["historico", "dashboards", "inicio"].includes(current())) refresh(); });
+     es.addEventListener("fault", () => { if (current() === "diagnostico") refresh(); });
+diff --git a/h50console/store.py b/h50console/store.py
+index 13f5666..c9ae6d0 100644
+--- a/h50console/store.py
++++ b/h50console/store.py
+@@ -103,6 +103,10 @@ MIGRATIONS = [
+     """
+     ALTER TABLE command_log ADD COLUMN via TEXT;
+     """,
++    # v5: se o robô saiu da base depois de um comando de limpeza aceito (1/0; vazio = não se aplica)
++    """
++    ALTER TABLE command_log ADD COLUMN confirmed INTEGER;
++    """,
+ ]
+ 
+ 
+@@ -284,6 +288,9 @@ class Store:
+             (iso(), source, command, _txt(params), _txt(result_code), latency_ms, error, via),
+         ).lastrowid
+ 
++    def confirm_command(self, command_id: int, ok: bool) -> None:
++        self._exec("UPDATE command_log SET confirmed=? WHERE id=?", (int(ok), command_id))
++
+     def commands(self, limit: int = 200) -> list[dict]:
+         return self._query("SELECT * FROM command_log ORDER BY id DESC LIMIT ?", (limit,))
+ 
+diff --git a/tests/test_stage23.py b/tests/test_stage23.py
+index dd5ff89..137de32 100644
+--- a/tests/test_stage23.py
++++ b/tests/test_stage23.py
+@@ -242,6 +242,35 @@ class PollerTests(unittest.TestCase):
+             self.gw.clean_rooms([6])
+         self.gw.run("home")                                 # voltar para a base pode
+ 
++    def test_cleaning_command_waits_for_the_robot_to_leave(self):
++        self.p.tick()
++        self.gw.clock = FakeClock()
++        self.drain()
++        self.gw.clean_rooms([6])                           # aceito (code 0), mas o robô continua na base
++        self.assertIsNotNone(self.gw.pending_start)
++        self.gw.check_start_confirmed()
++        self.assertIsNotNone(self.gw.pending_start)        # ainda dentro do prazo
++        self.gw.clock.t += 61
++        with self.assertLogs("h50console.gateway", "WARNING"):
++            self.gw.check_start_confirmed()
++        self.assertIsNone(self.gw.pending_start)
++        row = self.store.commands()[0]
++        self.assertEqual((row["command"], row["via"], row["confirmed"]), ("action:2/16", "lan", 0))
++        evs = []
++        while not self.events.empty():
++            evs.append(self.events.get_nowait())
++        self.assertIn(("command_check", {"command": "action:2/16", "via": "lan", "ok": False}), evs)
++        # desta vez o robô sai: o poller lê o status novo e confirma
++        self.gw.clean_zones([[0, 1000, 0, 0, 1000, 0, 1000, 1000]])
++        self.fake.values["2/2"] = 4
++        self.clock.t += 100
++        self.p.tick()
++        self.assertIsNone(self.gw.pending_start)
++        self.assertEqual(self.store.commands()[0]["confirmed"], 1)
++        self.gw.run("locate")                              # não sai da base: nada a confirmar
++        self.assertIsNone(self.gw.pending_start)
++        self.assertIsNone(self.store.commands()[0]["confirmed"])
++
+     def test_set_with_stale_reread_keeps_written_value(self):
+         self.p.tick()
+         orig = self.fake.send
+-- 
+2.53.0
+
