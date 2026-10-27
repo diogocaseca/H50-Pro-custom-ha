@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.9
+
+- Correção: o percurso do robô no mapa (Início e Histórico) aparecia cortado, só com as curvas. O H50 Pro grava só os
+  pontos onde muda de direção, e o painel não ligava pontos a mais de 1 m um do outro, então as faixas retas da limpeza
+  sumiam. Agora os pontos de limpeza são sempre ligados; a regra de 1 m vale só para o deslocamento (o salto da base
+  até a área continua sem linha).
+
 ## 0.4.8
 
 - Correção: a conexão local caía para a nuvem a cada poucos minutos. Bastava uma resposta perdida do robô (normal no
