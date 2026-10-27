@@ -1,0 +1,255 @@
+From 3652cb7eb839b27de00751766d963cf1ab4fef81 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Mon, 26 Oct 2026 22:50:58 -0300
+Subject: [PATCH 13/14] LAN: nova tentativa na leitura e sondagem antes de cada
+ comando
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O UDP perde uma resposta de vez em quando (visto no H50 Pro ao lado do
+roteador: uma a cada poucos minutos, em pedidos que respondem em ~10 ms).
+Com uma resposta perdida o AutoClient passava 60 s na nuvem, e um comando
+do usuário nessa janela ia pela nuvem, que já aceitou comando (code 0)
+sem que ele chegasse ao robô.
+
+- Leitura (get_properties): uma nova tentativa pela LAN antes de ir para
+  a nuvem, com 2 s por tentativa (o mesmo tempo total de antes).
+- Comando do usuário: dentro da janela da nuvem, o Gateway sonda a LAN
+  (handshake de 1,5 s) e, se ela responder, o comando vai por ela.
+- command_log ganha a coluna via (lan | cloud), mostrada na tabela de
+  comandos do Diagnóstico e no evento "command".
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/gateway.py    | 13 ++++++++++---
+ h50console/miio.py       |  1 +
+ h50console/static/app.js |  1 +
+ h50console/store.py      | 10 +++++++---
+ h50console/transport.py  | 38 ++++++++++++++++++++++++++++++++++++++
+ tests/test_stage23.py    |  1 +
+ tests/test_transport.py  | 31 ++++++++++++++++++++++++++++++-
+ 7 files changed, 88 insertions(+), 7 deletions(-)
+
+diff --git a/h50console/gateway.py b/h50console/gateway.py
+index 5f1f1ea..7241e87 100644
+--- a/h50console/gateway.py
++++ b/h50console/gateway.py
+@@ -137,11 +137,17 @@ class Gateway:
+         if name in catalog.LEAVES_BASE and reason:
+             raise CommandBlocked(f"robô ocupado: {reason} (status {self.cache.get('2/2')})")
+ 
++    def _send(self, fn: Callable, *args):
++        wake = getattr(self.dev.client, "wake_lan", None)    # comando do usuário: tenta a LAN mesmo na janela da nuvem
++        if wake:
++            wake()
++        return fn(*args)
++
+     def _command(self, label: str, params, fn: Callable, *args, source: str = "ui", reread: list[str] = ()):
+         t0 = time.perf_counter()
+         code, err, res = None, None, None
+         try:
+-            res = self._call(fn, *args, high=True)
++            res = self._call(self._send, fn, *args, high=True)
+             code = res.get("code") if isinstance(res, dict) else 0
+             if reread:
+                 changes = self.cache.update(self._call(self.dev.values, list(reread), high=True))
+@@ -153,8 +159,9 @@ class Gateway:
+             err = f"{type(ex).__name__}: {ex}"
+             raise
+         finally:
+-            self.store.log_command(source, label, params, code, int((time.perf_counter() - t0) * 1000), err)
+-            self.bus.publish("command", {"command": label, "code": code, "error": err})
++            via = self.via
++            self.store.log_command(source, label, params, code, int((time.perf_counter() - t0) * 1000), err, via)
++            self.bus.publish("command", {"command": label, "code": code, "error": err, "via": via})
+             self.poke.set()
+ 
+     def check_start(self) -> None:
+diff --git a/h50console/miio.py b/h50console/miio.py
+index 56532e5..614577b 100644
+--- a/h50console/miio.py
++++ b/h50console/miio.py
+@@ -218,6 +218,7 @@ class MiioClient:
+                 self._id += 100            # mesma estratégia do python-miio
+                 if attempt == retry:
+                     raise
++                log.debug("sem resposta ao id=%s (%s); nova tentativa", req_id, method)
+                 continue
+             log.debug("<< %s", resp)
+             if "error" in resp:
+diff --git a/h50console/static/app.js b/h50console/static/app.js
+index d31e080..f06b377 100644
+--- a/h50console/static/app.js
++++ b/h50console/static/app.js
+@@ -682,6 +682,7 @@
+         { key: "params", label: "Parâmetros" },
+         { key: "result_code", label: "Código" },
+         { key: "latency_ms", label: "ms", num: true },
++        { key: "via", label: "Via", render: (r) => ({ lan: "rede local", cloud: "nuvem" })[r.via] || "—" },
+         { key: "error", label: "Erro" },
+         { key: "source", label: "Origem" },
+       ], cmds);
+diff --git a/h50console/store.py b/h50console/store.py
+index 86f5c35..13f5666 100644
+--- a/h50console/store.py
++++ b/h50console/store.py
+@@ -99,6 +99,10 @@ MIGRATIONS = [
+       updated_at TEXT NOT NULL
+     );
+     """,
++    # v4: por onde o comando foi (lan | cloud)
++    """
++    ALTER TABLE command_log ADD COLUMN via TEXT;
++    """,
+ ]
+ 
+ 
+@@ -274,10 +278,10 @@ class Store:
+ 
+     # -- comandos ------------------------------------------------------------------
+     def log_command(self, source: str, command: str, params, result_code, latency_ms: int | None,
+-                    error: str | None = None) -> int:
++                    error: str | None = None, via: str | None = None) -> int:
+         return self._exec(
+-            "INSERT INTO command_log (ts, source, command, params, result_code, latency_ms, error) VALUES (?,?,?,?,?,?,?)",
+-            (iso(), source, command, _txt(params), _txt(result_code), latency_ms, error),
++            "INSERT INTO command_log (ts, source, command, params, result_code, latency_ms, error, via) VALUES (?,?,?,?,?,?,?,?)",
++            (iso(), source, command, _txt(params), _txt(result_code), latency_ms, error, via),
+         ).lastrowid
+ 
+     def commands(self, limit: int = 200) -> list[dict]:
+diff --git a/h50console/transport.py b/h50console/transport.py
+index 13aec2c..8d97e05 100644
+--- a/h50console/transport.py
++++ b/h50console/transport.py
+@@ -14,6 +14,7 @@ from __future__ import annotations
+ import logging
+ import threading
+ import time
++from contextlib import contextmanager
+ 
+ from .miio import MiioClient, MiioError
+ 
+@@ -26,6 +27,12 @@ CLOUD_BATCH_BYTES = 2800
+ CLOUD_BATCH_ITEMS = 40
+ _OK_OR_MISSING = {0, -704040002, -704040003}   # ok; propriedade inexistente / sem acesso de leitura
+ LAN_RETRY_AFTER = 60.0             # depois de a LAN falhar, só tenta de novo após este tempo
++# O UDP perde uma resposta de vez em quando (visto em 26/10 no H50 Pro, ao lado do roteador: uma a cada poucos
++# minutos, em pedidos que respondem em ~10 ms). Leitura: duas tentativas de 2 s (o tempo de uma de 4 s) antes
++# de ir para a nuvem. Comando do usuário: dentro da janela da nuvem, sonda a LAN antes (a nuvem já aceitou
++# comando com code 0 que não chegou ao robô).
++LAN_READ_TIMEOUT = 2.0
++LAN_PROBE_TIMEOUT = 1.5
+ 
+ 
+ class CloudClient:
+@@ -141,6 +148,34 @@ class AutoClient:
+             log.info("LAN voltou a responder; saindo do modo nuvem")
+         return True
+ 
++    @contextmanager
++    def _lan_timeout(self, seconds: float):
++        """Encurta o timeout do cliente LAN só durante o bloco (as chamadas já vêm serializadas pelo Gateway)."""
++        old = getattr(self.lan_client, "timeout", None)
++        if old is None:
++            yield
++            return
++        self.lan_client.timeout = min(old, seconds)
++        try:
++            yield
++        finally:
++            self.lan_client.timeout = old
++
++    def wake_lan(self) -> None:
++        """Antes de um comando do usuário: dentro da janela da nuvem, sonda a LAN agora (não espera a janela acabar)."""
++        with self._lock:
++            if self.cloud_client is None or not self._lan_down_until:
++                return
++            try:
++                with self._lan_timeout(LAN_PROBE_TIMEOUT):
++                    self.lan_client.handshake(_rediscover=False)
++            except MiioError:
++                log.info("comando: LAN ainda sem resposta; vai pela nuvem")
++                return
++            self._lan_down_until = 0.0
++            self.mode = "lan"
++            log.info("LAN voltou a responder (sondada antes de um comando); saindo do modo nuvem")
++
+     def prepare(self) -> None:
+         """Decide o transporte ANTES de planejar os lotes (o limite de tamanho depende dele)."""
+         with self._lock:
+@@ -155,6 +190,9 @@ class AutoClient:
+         self.prepare()
+         if self.mode == "lan":
+             try:
++                if method == "get_properties":                     # leitura: pode repetir sem efeito colateral
++                    with self._lan_timeout(LAN_READ_TIMEOUT):
++                        return self.lan_client.send(method, params, retry=max(retry, 1))
+                 return self.lan_client.send(method, params, retry=retry)
+             except MiioError:
+                 if self.cloud_client is None:
+diff --git a/tests/test_stage23.py b/tests/test_stage23.py
+index 280e33f..dd5ff89 100644
+--- a/tests/test_stage23.py
++++ b/tests/test_stage23.py
+@@ -233,6 +233,7 @@ class PollerTests(unittest.TestCase):
+         log = self.store.commands()
+         self.assertEqual([c["command"] for c in log], ["set:2/31", "run:locate", "set:2/31"])
+         self.assertIn("ValueError", log[0]["error"])
++        self.assertEqual({c["via"] for c in log}, {"lan"})        # por onde cada comando foi
+         # base trabalhando: não deixa sair
+         self.gw.cache.update({"2/2": 12})
+         with self.assertRaises(CommandBlocked):
+diff --git a/tests/test_transport.py b/tests/test_transport.py
+index 94164fa..b880026 100644
+--- a/tests/test_transport.py
++++ b/tests/test_transport.py
+@@ -93,7 +93,7 @@ class CloudClientTests(unittest.TestCase):
+ class AutoClientTests(unittest.TestCase):
+     def setUp(self):
+         self.lan = FakeClient({"2/2": 2, "3/1": 90})
+-        self.lan.handshake = lambda: (_ for _ in ()).throw(MiioError("off")) if self.lan.offline else None
++        self.lan.handshake = lambda **_: (_ for _ in ()).throw(MiioError("off")) if self.lan.offline else None
+         self.svc = FakeCloudService({"2/2": 4, "3/1": 80})
+         self.auto = AutoClient(self.lan, CloudClient(self.svc, "1000000001"), retry_after=0.05)
+         self.req = [{"did": "x", "siid": 3, "piid": 1}]
+@@ -129,6 +129,35 @@ class AutoClientTests(unittest.TestCase):
+         self.assertEqual((self.auto.max_batch_bytes, self.auto.max_batch_items), (2800, 40))   # limites medidos
+         self.assertTrue(self.auto.oversize_ok)
+ 
++    def test_one_lost_read_is_retried_on_lan(self):
++        orig, seen = self.lan.send, []
++        self.lan.timeout = 4.0
++
++        def lossy(method, params=None, retry=1):     # o MiioClient repete sozinho até `retry` vezes
++            seen.append((retry, self.lan.timeout))
++            if not retry:                            # sem nova tentativa, a resposta perdida derruba a LAN
++                raise MiioError("timeout")
++            return orig(method, params, retry)
++        self.lan.send = lossy
++        r = self.auto.send("get_properties", self.req, retry=0)
++        self.assertEqual((r[0]["value"], self.auto.mode), (90, "lan"))
++        self.assertEqual(seen, [(1, 2.0)])           # leitura: uma nova tentativa, 2 s cada
++        self.assertEqual(self.lan.timeout, 4.0)      # o timeout volta ao normal
++        self.assertEqual(self.svc.calls, [])
++
++    def test_command_probes_lan_inside_the_cloud_window(self):
++        self.auto.retry_after = 60
++        self.lan.offline = True
++        self.auto.send("get_properties", self.req)
++        self.assertEqual(self.auto.mode, "cloud")
++        self.auto.wake_lan()                         # LAN ainda fora: continua na nuvem
++        self.assertEqual(self.auto.mode, "cloud")
++        self.lan.offline = False
++        self.auto.wake_lan()                         # voltou: o comando vai pela LAN sem esperar os 60 s
++        self.auto.send("action", {"did": "2/16", "siid": 2, "aiid": 16, "in": ["6"]})
++        self.assertEqual(self.auto.mode, "lan")
++        self.assertEqual(self.lan.calls[-1][0], "action")
++
+     def test_without_cloud_raises(self):
+         a = AutoClient(self.lan, None)
+         self.lan.offline = True
+-- 
+2.53.0
+
