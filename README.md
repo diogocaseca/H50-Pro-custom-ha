@@ -24,7 +24,7 @@ h50console/                # o app (slug h50console); é o contexto de build do 
   config.yaml build.yaml   # build.yaml → args.H50_COMMIT: commit do original usado no build
   Dockerfile  run.py      # run.py lê as opções; com mqtt ligado, sobe o painel e a ponte
   mqtt_bridge.py tests/    # ponte MQTT (discovery) e os testes dela
-  patches/0001-…0012-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
+  patches/0001-…0014-…     # mudanças sobre o original (git format-patch), aplicadas em ordem
 tools/update-upstream.sh   # move os patches para um commit novo do original
 ```
 
@@ -52,6 +52,8 @@ Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta ex
 | 0010 | Zoom no mapa do Início: botões +/−/⟲, pinça e Ctrl + rodinha; arrastar move o mapa ampliado |
 | 0011 | Limite de zonas desenhadas por limpeza, na tabela de ajustes (grupo Sistema) do painel (padrão 3), com testes |
 | 0012 | Progresso da secagem calculado pela duração (2/31) e minutos restantes (2/90): o H50 Pro deixa o 2/88 em 0, com testes |
+| 0013 | Rede local: nova tentativa nas leituras antes de ir para a nuvem e sondagem da rede local antes de cada comando; coluna Via na tabela de comandos, com testes |
+| 0014 | Comando de limpeza: confere se o robô saiu da base em até 60 s e avisa se não saiu; coluna Confirmado, com testes |
 
 A **ponte MQTT** ([h50console/mqtt_bridge.py](h50console/mqtt_bridge.py), opção `mqtt` do app) é código deste
 repositório, não um patch: ela só usa a API HTTP do painel, então não conflita com atualizações do original. Os testes

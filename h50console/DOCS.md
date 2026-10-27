@@ -36,6 +36,13 @@ Como o Home Assistant fica sempre em casa, não há motivo para a reserva pela n
 continua sendo usada apenas para: baixar o mapa, a lista de dispositivos/token ao cadastrar e, se você pedir, o
 histórico de limpezas.
 
+A rede local usa UDP, que perde uma resposta de vez em quando mesmo com o robô ao lado do roteador. O painel tenta de
+novo antes de desistir. No **Automático**, ele também testa a rede local antes de cada comando seu e só manda pela nuvem
+se ela não responder: a nuvem já aceitou comando que não chegou ao robô.
+
+Na aba **Diagnóstico**, a tabela **Comandos enviados** mostra por onde cada comando foi (**Via**: rede local ou nuvem)
+e, nos comandos de limpeza, se o robô saiu da base (**Confirmado**). Se ele não sair em 1 minuto, o painel avisa.
+
 ## Opções
 
 | Opção | Padrão | O que faz |

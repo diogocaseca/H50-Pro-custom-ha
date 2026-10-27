@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.8
+
+- Correção: a conexão local caía para a nuvem a cada poucos minutos. Bastava uma resposta perdida do robô (normal no
+  Wi-Fi, mesmo com sinal cheio) para o painel passar 60 s na nuvem, e um comando nessa janela podia ser aceito pela
+  nuvem sem chegar ao robô. Agora a leitura tenta de novo pela rede local antes de ir para a nuvem.
+- Antes de cada comando, o painel testa a rede local, mesmo dentro da janela da nuvem; só manda pela nuvem se ela não
+  responder.
+- Depois de um comando de limpeza, o painel confere se o robô saiu da base. Se não sair em 1 minuto, mostra um aviso
+  ("aceitou o comando mas não saiu da base") e grava no Registro do app.
+- Diagnóstico → Comandos enviados: colunas **Via** (rede local ou nuvem) e **Confirmado**.
+
 ## 0.4.7
 
 - Painel: a linha **Progresso da secagem** do Estado do robô e o aviso **Secando** do Início mostram a porcentagem
