@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Zonas no mapa do Início: o modo **Desenhar zona** deu lugar ao botão **+ Zona**, que põe um retângulo de
+  1,5 × 1,5 m no meio da parte visível do mapa. Arraste a zona para movê-la e um canto para mudar o tamanho.
+- Com zoom, arrastar fora das zonas move o mapa (antes, no modo desenho, todo arrasto virava uma zona nova).
+- Com zonas na seleção, tocar num cômodo não desfaz mais as zonas sem querer.
+- Zona salva aparece só para ver: não dá para mover nem redimensionar.
+
 ## 0.4.9
 
 - Correção: o percurso do robô no mapa (Início e Histórico) aparecia cortado, só com as curvas. O H50 Pro grava só os

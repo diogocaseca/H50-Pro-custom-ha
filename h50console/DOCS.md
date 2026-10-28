@@ -106,18 +106,22 @@ usuário com que você entrou.
 
 ## Limpeza por zona
 
-No **Início**, toque em **Desenhar zona** (abaixo do mapa) e arraste no mapa para fazer um retângulo. Dá para desenhar
-até 3 zonas (ajustável de 1 a 10, ver abaixo); cada uma aparece numerada, com o tamanho em metros, e o **✕** tira uma
-delas. Toque em **Concluir** e depois em **Iniciar limpeza**. A limpeza usa os **Modos** atuais. O mapa vem da nuvem,
-então desenhar zonas exige a conta Xiaomi conectada; a limpeza em si vai pela rede local.
+No **Início**, toque em **+ Zona** (abaixo do mapa): aparece um retângulo de 1,5 × 1,5 m no meio da parte do mapa que
+está na tela. Arraste o retângulo para levá-lo ao lugar certo e arraste um dos cantos (as bolinhas) para mudar o
+tamanho. Dá para ter até 3 zonas (ajustável de 1 a 10, ver abaixo); cada uma aparece numerada, com o tamanho em metros,
+e o **✕** tira uma delas. Depois toque em **Iniciar limpeza**. A limpeza usa os **Modos** atuais. O mapa vem da nuvem,
+então criar zonas exige a conta Xiaomi conectada; a limpeza em si vai pela rede local.
 
 - Cada lado precisa ter ao menos 0,3 m. Abaixo de 0,7 m o painel avisa: o robô pode recusar zonas pequenas.
-- Zonas e cômodos não se misturam: escolher um cômodo desfaz as zonas e vice-versa.
+- Zonas e cômodos não se misturam: com zonas na seleção, tocar num cômodo não faz nada (tire as zonas no **✕**
+  para escolher cômodos); adicionar uma zona desfaz os cômodos escolhidos.
+- **Zona salva** (escolhida em **Área**) aparece no mapa só para ver: não dá para mover nem mudar o tamanho. Tocar em
+  **+ Zona** com ela escolhida começa uma seleção nova.
 - **Limite de zonas:** o administrador muda na aba **Configurações** do painel, na tabela de ajustes, grupo
   **Sistema**, item **Limite de zonas desenhadas por limpeza** (1 a 10, padrão 3). Vale para desenhar e para salvar
   zonas; as rotinas do app Xiaomi Home e as zonas já salvas não são afetadas.
 - **Zoom:** botões **+**, **−** e **⟲** no canto do mapa, pinça com dois dedos ou **Ctrl + rodinha**. Com zoom,
-  arrastar move o mapa; no modo "Desenhar zona", um dedo desenha e dois movem e ampliam.
+  arrastar fora das zonas move o mapa; arrastar dentro de uma zona move a zona.
 
 **Zonas com nome** (só o administrador salva e apaga): depois de desenhar, **Salvar zona** pede um nome. As zonas salvas
 aparecem no menu **Área**, junto dos cômodos, para todos que podem comandar o robô. O nome não pode repetir o de outra
