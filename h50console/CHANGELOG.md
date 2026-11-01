@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Correção: durante a limpeza o mapa do Início podia ficar parado. Agora ele é atualizado a cada 45 s enquanto o robô
+  limpa, com o mapa que o app já baixava para gravar o percurso (sem downloads a mais na nuvem). Vale com a conta
+  Xiaomi conectada, e a tela não precisa estar aberta desde o início da limpeza.
+
 ## 0.5.0
 
 - Zonas no mapa do Início: o modo **Desenhar zona** deu lugar ao botão **+ Zona**, que põe um retângulo de
