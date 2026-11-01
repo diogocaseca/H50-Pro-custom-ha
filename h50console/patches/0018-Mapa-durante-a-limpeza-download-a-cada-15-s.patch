@@ -1,0 +1,34 @@
+From 2a05537e7ef7809bd36f41d58fa4554998ce1906 Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Sun, 1 Nov 2026 18:37:52 -0300
+Subject: [PATCH] Mapa durante a limpeza: download a cada 15 s
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O gravador do caminho baixava o mapa a cada 45 s; desde o patch anterior
+esse download também atualiza o mapa do Início. Com 15 s a tela acompanha
+o robô mais de perto. O laço já roda a cada 5 s, então o intervalo novo é
+respeitado.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/paths.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/h50console/paths.py b/h50console/paths.py
+index 731de95..3b191b2 100644
+--- a/h50console/paths.py
++++ b/h50console/paths.py
+@@ -26,7 +26,7 @@ def _signature(points: list) -> tuple:
+ 
+ 
+ class PathRecorder:
+-    def __init__(self, gw, store, fetch, interval: float = 45, settle: float = 60, clock=time.time):
++    def __init__(self, gw, store, fetch, interval: float = 15, settle: float = 60, clock=time.time):
+         self.gw, self.store, self.fetch = gw, store, fetch     # fetch() -> lista de [x, y, tipo] ou None
+         self.interval, self.settle, self.clock = interval, settle, clock
+         self.key: int | None = store.get_setting("path_live_key")
+-- 
+2.53.0
+
