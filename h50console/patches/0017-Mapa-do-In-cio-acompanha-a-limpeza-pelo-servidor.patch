@@ -1,0 +1,107 @@
+From e0c79435f5b38248ed023c2ea9509a4cb0c38c7c Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Sun, 1 Nov 2026 18:34:12 -0300
+Subject: [PATCH] =?UTF-8?q?Mapa=20do=20In=C3=ADcio=20acompanha=20a=20limpe?=
+ =?UTF-8?q?za=20pelo=20servidor?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Durante a limpeza a tela só baixava o mapa quando via o 10/1 mudar, e isso
+dependia do Início aberto e do ritmo com que o robô troca o 10/1. O
+gravador do caminho já baixa o mapa inteiro a cada 45 s enquanto o robô
+limpa: agora esse download vira o mapa do Início (latest.json) e o evento
+"mapdata" redesenha a tela. Não aumenta os downloads na nuvem: o pedido da
+tela logo depois cai no limite de 20 s.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/fleet.py |  2 +-
+ h50console/paths.py | 12 ++++++++++--
+ tests/test_paths.py | 29 +++++++++++++++++++++++++++++
+ 3 files changed, 40 insertions(+), 3 deletions(-)
+
+diff --git a/h50console/fleet.py b/h50console/fleet.py
+index c2da508..c1af0f6 100644
+--- a/h50console/fleet.py
++++ b/h50console/fleet.py
+@@ -142,7 +142,7 @@ class Robot:
+             history.start_sync(self.bus, self.fleet.cloud, self.store, lambda: self.cfg.did or None, stop=self._stop)
+             self.path_recorder = paths.PathRecorder(
+                 self.gw, self.store, paths.make_fetch(self.gw, self.fleet.cloud, lambda: self.cfg.did or None,
+-                                                      lambda: self.cfg.model))
++                                                      lambda: self.cfg.model, map_dir=self.map_dir))
+             paths.start(self.bus, self.path_recorder, stop=self._stop)
+             threading.Thread(target=self._learn_did, name=f"did-{self.cfg.id}", daemon=True).start()
+ 
+diff --git a/h50console/paths.py b/h50console/paths.py
+index 57160d4..731de95 100644
+--- a/h50console/paths.py
++++ b/h50console/paths.py
+@@ -82,13 +82,21 @@ class PathRecorder:
+         return False
+ 
+ 
+-def make_fetch(gw, service, did_fn, model_fn):
+-    """Baixa o mapa atual (10/1) pela nuvem e devolve só a trajetória."""
++def make_fetch(gw, service, did_fn, model_fn, map_dir=None):
++    """Baixa o mapa atual (10/1) pela nuvem e devolve só a trajetória.
++
++    Com `map_dir`, o mapa baixado também vira o mapa do Início (latest.json) e o evento `mapdata` redesenha a tela:
++    assim o mapa acompanha a limpeza sem depender de o navegador ver o 10/1 mudar.
++    """
+     def fetch():
+         did = did_fn()
+         obj = decoders.parse_json(gw.cache.get("10/1"), {}).get("obj_name")
+         if not (did and obj) or service.state != "ok":
+             return None
++        if map_dir is not None:
++            service.fetch_map(obj, str(did), map_dir, model=model_fn())
++            gw.bus.publish("mapdata", {"at": int(time.time())})
++            return (service.latest_map(map_dir) or {}).get("path")
+         raw = service.fetch_object(obj, str(did))
+         return mapdecode.for_ui(mapdecode.decrypt(raw, model_fn(), str(did)))["path"]
+     return fetch
+diff --git a/tests/test_paths.py b/tests/test_paths.py
+index 7592d6c..3bddd13 100644
+--- a/tests/test_paths.py
++++ b/tests/test_paths.py
+@@ -70,6 +70,35 @@ class Recorder(unittest.TestCase):
+         self.assertEqual(again.key, key)
+ 
+ 
++class LiveMap(unittest.TestCase):
++    def test_download_while_cleaning_becomes_the_home_map(self):
++        import json
++        from h50console.paths import make_fetch
++
++        class Bus:
++            def __init__(self): self.events = []
++            def publish(self, ev, payload): self.events.append(ev)
++
++        class Service:                                         # o mesmo contrato do CloudService
++            state = "ok"
++            def __init__(self): self.calls = []
++            def fetch_map(self, obj, did, map_dir, model=""):
++                self.calls.append((obj, did, map_dir, model))
++                (map_dir / "latest.json").write_text(json.dumps({"path": [[1, 2, 1]]}))
++            def latest_map(self, map_dir):
++                return json.loads((map_dir / "latest.json").read_text())
++
++        import tempfile
++        from pathlib import Path
++        with tempfile.TemporaryDirectory() as d:
++            gw, svc = FakeGw(), Service()
++            gw.bus, gw.cache["10/1"] = Bus(), json.dumps({"index": 1, "obj_name": "u/42/0"})
++            fetch = make_fetch(gw, svc, lambda: 42, lambda: "m", map_dir=Path(d))
++            self.assertEqual(fetch(), [[1, 2, 1]])
++            self.assertEqual(svc.calls, [("u/42/0", "42", Path(d), "m")])
++            self.assertEqual(gw.bus.events, ["mapdata"])               # a tela do Início redesenha
++
++
+ class Coverage(unittest.TestCase):
+     def test_counts_each_cleaning_once_per_cell(self):
+         import time
+-- 
+2.53.0
+
