@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- O mapa do Início agora é baixado quando o robô envia um mapa novo para a nuvem (cerca de 1 vez por minuto durante a
+  limpeza): o painel lê o aviso de mapa novo a cada 5 s pela rede local e baixa na hora. O mapa aparece uns 5 s depois
+  do envio do robô.
+- O mapa continua atualizando na volta para a base, até o fim da limpeza.
+- Se o robô ficar 45 s sem enviar mapa novo durante a limpeza, o painel baixa assim mesmo. Volta o intervalo de 45 s
+  no lugar dos 15 s da 0.5.1.
+
 ## 0.5.1
 
 - Correção: durante a limpeza o mapa do Início podia ficar parado. Agora ele é atualizado a cada 15 s enquanto o robô
