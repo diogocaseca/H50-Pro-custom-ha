@@ -283,13 +283,15 @@ A aba **Manutenção** do painel também gera backups criptografados próprios.
 ## De onde vem o código
 
 O painel é o [H50 Console](https://github.com/nathanabreu/H50-Pro-custom), de
-[Nathan Dame Abreu](https://github.com/nathanabreu). Este app não guarda uma cópia dele: ao instalar ou atualizar, o
-Home Assistant baixa o original num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica patches pequenos
-(pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login, o modo Ingress
-a escolha do servidor da nuvem, a API local por token usada pela integração MQTT e os perfis por usuário do HA. A ponte MQTT é código deste app.
+[Nathan Dame Abreu](https://github.com/nathanabreu), com as melhorias do fork
+[diogocaseca/H50-Pro-custom](https://github.com/diogocaseca/H50-Pro-custom). Este app não guarda uma cópia dele: ao
+instalar ou atualizar, o Home Assistant baixa o fork num commit fixo (`H50_COMMIT` em `build.yaml`) e aplica patches
+pequenos (pasta `patches/`), todos opt-in: caminhos relativos no front, redirecionamento relativo para o login, o modo
+Ingress, a API local por token usada pela integração MQTT e os perfis por usuário do HA. A ponte MQTT é código deste app.
 Se um patch não aplicar, a instalação falha em vez de gerar um painel incompleto. Detalhes no
 [repositório do app](https://github.com/diogocaseca/H50-Pro-custom-ha).
 
 ## Licença
 
-MIT. Baseado em [nathanabreu/H50-Pro-custom](https://github.com/nathanabreu/H50-Pro-custom).
+MIT. Baseado em [nathanabreu/H50-Pro-custom](https://github.com/nathanabreu/H50-Pro-custom), pelo fork
+[diogocaseca/H50-Pro-custom](https://github.com/diogocaseca/H50-Pro-custom).

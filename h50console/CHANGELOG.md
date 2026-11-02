@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3
+
+- O código do painel agora vem do fork [diogocaseca/H50-Pro-custom](https://github.com/diogocaseca/H50-Pro-custom),
+  baseado no original de Nathan Dame Abreu. As melhorias que valem para qualquer instalação (antigos patches 0004 e
+  0007 a 0019) viraram commits do fork; aqui ficam só os 5 patches do Home Assistant. O painel instalado é o mesmo da
+  0.5.2: nada muda no uso.
+
 ## 0.5.2
 
 - O mapa do Início agora é baixado quando o robô envia um mapa novo para a nuvem (cerca de 1 vez por minuto durante a
