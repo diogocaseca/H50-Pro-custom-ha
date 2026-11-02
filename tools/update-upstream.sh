@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Move os patches de h50console/patches/ para um commit novo do original (nathanabreu/H50-Pro-custom).
+# Move os patches de h50console/patches/ para um commit novo do fork (diogocaseca/H50-Pro-custom).
 #
-#   tools/update-upstream.sh <commit>          clona o original, aplica os patches (git am) sobre <commit> e, se
+#   tools/update-upstream.sh <commit>          clona o fork, aplica os patches (git am) sobre <commit> e, se
 #                                              aplicarem, regera h50console/patches/ e atualiza H50_COMMIT no build.yaml
 #   tools/update-upstream.sh --finish <pasta>  depois de resolver um conflito na <pasta> indicada, conclui o passo acima
 #
@@ -9,7 +9,7 @@
 # `docker build --target test` antes.
 set -euo pipefail
 
-UPSTREAM_REPO=${UPSTREAM_REPO:-https://github.com/nathanabreu/H50-Pro-custom}
+UPSTREAM_REPO=${UPSTREAM_REPO:-https://github.com/diogocaseca/H50-Pro-custom}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PATCHES=$ROOT/h50console/patches
 BUILD_YAML=$ROOT/h50console/build.yaml

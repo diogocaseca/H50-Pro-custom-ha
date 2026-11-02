@@ -1,7 +1,7 @@
-From fbb57f4e614f44639526f327805ad75bcd8300fb Mon Sep 17 00:00:00 2001
+From 7a50c9d14ea0645e39ee5aa130ee97cc0c348725 Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Thu, 22 Oct 2026 22:32:53 -0300
-Subject: [PATCH 3/3] Modo Ingress do Home Assistant (opt-in: H50_INGRESS=true)
+Subject: [PATCH 3/5] Modo Ingress do Home Assistant (opt-in: H50_INGRESS=true)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -19,14 +19,14 @@ Sem as variáveis, nada muda.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  h50console/__main__.py   | 15 ++++++--
- h50console/config.py     |  5 +++
+ h50console/config.py     |  6 ++-
  h50console/static/app.js |  1 +
  h50console/web.py        | 45 +++++++++++++++-------
  tests/test_auth.py       | 80 ++++++++++++++++++++++++++++++++++++++--
- 5 files changed, 126 insertions(+), 20 deletions(-)
+ 5 files changed, 126 insertions(+), 21 deletions(-)
 
 diff --git a/h50console/__main__.py b/h50console/__main__.py
-index 994ea52..381e54a 100644
+index 5e88fce..7c466d5 100644
 --- a/h50console/__main__.py
 +++ b/h50console/__main__.py
 @@ -22,7 +22,7 @@ from .config import Config
@@ -38,7 +38,7 @@ index 994ea52..381e54a 100644
  
  
  def _passphrase(confirm: bool = False) -> str:
-@@ -46,18 +46,24 @@ def serve(cfg: Config) -> int:
+@@ -46,12 +46,15 @@ def serve(cfg: Config) -> int:
      if not cfg.auth_enabled and not is_loopback(cfg.host):
          raise SystemExit(f"Recusado: H50_AUTH=off só é permitido em localhost (H50_HOST={cfg.host}). "
                           "Ative a senha (padrão) ou use H50_HOST=127.0.0.1.")
@@ -55,8 +55,10 @@ index 994ea52..381e54a 100644
  
      fleet.start_all()
      names = ", ".join(f"{r.cfg.name} ({r.cfg.transport})" for r in fleet.robots.values()) or "nenhum (cadastre na interface)"
-     log.info("H50 Console %s | dados em %s | robôs: %s", __version__, cfg.data_dir, names)
+@@ -59,7 +62,10 @@ def serve(cfg: Config) -> int:
      log.info("painel em http://%s:%s  (Ctrl+C para sair)", cfg.host, cfg.port)
+     if cfg.cloud_country:
+         log.info("nuvem Xiaomi: servidor fixo '%s' (H50_CLOUD_COUNTRY)", cfg.cloud_country)
 -    if auth.enabled and auth.setup_code:
 +    if cfg.ingress:
 +        log.info("modo Ingress (Home Assistant): pedidos do gateway %s entram sem senha%s", INGRESS_GATEWAY,
@@ -65,7 +67,7 @@ index 994ea52..381e54a 100644
          log.warning("PRIMEIRO ACESSO: abra o painel e crie a senha com o código  %s", auth.setup_code)
      elif not auth.enabled:
          log.warning("autenticação DESLIGADA (H50_AUTH=off): qualquer pessoa que alcance %s:%s controla o robô", cfg.host, cfg.port)
-@@ -94,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
+@@ -96,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
          from . import mcp
          return mcp.main()
      cfg = Config.from_env()
@@ -76,7 +78,7 @@ index 994ea52..381e54a 100644
      if args.cmd == "version":
          print(__version__)
 diff --git a/h50console/config.py b/h50console/config.py
-index aa8ff71..1df8920 100644
+index e441fa4..33839f9 100644
 --- a/h50console/config.py
 +++ b/h50console/config.py
 @@ -42,6 +42,9 @@ class Config:
@@ -86,23 +88,24 @@ index aa8ff71..1df8920 100644
 +    ingress: bool = False              # H50_INGRESS: app do Home Assistant; o gateway do Ingress conta como administrador
 +    ingress_only: bool = False         # H50_INGRESS_ONLY: recusa quem não vem do Ingress (nem do loopback)
 +    log_level: str = "INFO"            # H50_LOG_LEVEL: DEBUG, INFO, WARNING ou ERROR
+     cloud_country: str = ""            # H50_CLOUD_COUNTRY: servidor da nuvem Xiaomi (us, de, sg...); vazio/auto = descobre
      # migração de instalações de um robô só (usados apenas se não houver robots.json)
      ip: str = ""
-     token: str = ""
-@@ -65,6 +68,8 @@ class Config:
+@@ -71,7 +74,8 @@ class Config:
              cookie_secure=_bool(e.get("H50_COOKIE_SECURE")),
              viewer_password=e.get("H50_VIEWER_PASSWORD", ""), metrics_token=e.get("H50_METRICS_TOKEN", ""),
              allowed_hosts=tuple(h.strip().lower() for h in e.get("H50_ALLOWED_HOSTS", "").split(",") if h.strip()),
+-            cloud_country=country,
 +            ingress=_bool(e.get("H50_INGRESS")), ingress_only=_bool(e.get("H50_INGRESS_ONLY")),
-+            log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO",
++            log_level=e.get("H50_LOG_LEVEL", "INFO").strip().upper() or "INFO", cloud_country=country,
              ip=e.get("H50_IP", ""), token=token, device_name=e.get("H50_NAME", ""),
          )
  
 diff --git a/h50console/static/app.js b/h50console/static/app.js
-index 46e0a24..7809de7 100644
+index 752b521..e5cc4b6 100644
 --- a/h50console/static/app.js
 +++ b/h50console/static/app.js
-@@ -746,6 +746,7 @@
+@@ -873,6 +873,7 @@
          confirm: async () => { await api("POST", "/api/auth/password", { current: cur.value, new: nw.value }); toast("Senha alterada"); },
        });
      };
@@ -111,19 +114,19 @@ index 46e0a24..7809de7 100644
      $("#sec-all").onclick = () => confirmAction("Sair de todos os aparelhos? Este também continua conectado.",
        () => run("Sair de todos", () => api("POST", "/api/auth/revoke", {})));
 diff --git a/h50console/web.py b/h50console/web.py
-index 14efa32..72f8c25 100644
+index d821864..0ddb339 100644
 --- a/h50console/web.py
 +++ b/h50console/web.py
 @@ -21,7 +21,7 @@ from pathlib import Path
  from urllib.parse import parse_qs, quote, urlparse
  
- from . import catalog, dash, decoders
+ from . import catalog, dash, decoders, zones
 -from .auth import AuthError
 +from .auth import AuthError, is_loopback
  from .gateway import CommandBlocked, Gateway
  from .miio import MiioError
  from .store import Store
-@@ -619,10 +619,15 @@ PUBLIC_FILES = {"/login.html", "/login.js", "/manifest.webmanifest", "/sw.js", "
+@@ -715,10 +715,15 @@ PUBLIC_FILES = {"/login.html", "/login.js", "/manifest.webmanifest", "/sw.js", "
  CSP = ("default-src 'self'; img-src 'self' data: https://*.xiaomi.com; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; "
         "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
@@ -140,7 +143,7 @@ index 14efa32..72f8c25 100644
      streams = {"n": 0}
      streams_lock = threading.Lock()
      class Handler(BaseHTTPRequestHandler):
-@@ -639,6 +644,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -735,6 +740,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                      return fwd
              return self.client_address[0]
  
@@ -151,7 +154,7 @@ index 14efa32..72f8c25 100644
          def _secure_cookie(self) -> bool:
              return cookie_secure or (trust_proxy and self.headers.get("X-Forwarded-Proto") == "https")
  
-@@ -665,8 +674,9 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -761,8 +770,9 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
              self.send_header("Cache-Control", "no-store")
              self.send_header("X-Content-Type-Options", "nosniff")
              self.send_header("Referrer-Policy", "no-referrer")
@@ -163,7 +166,7 @@ index 14efa32..72f8c25 100644
              self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
              self.send_header("Cross-Origin-Opener-Policy", "same-origin")
              self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-@@ -694,7 +704,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -790,7 +800,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
          def _host_ok(self) -> bool:
              """Servidor só em localhost e sem proxy: recusa Host de outro nome (DNS rebinding: um site que
              aponta o próprio domínio para 127.0.0.1 e tenta falar com o painel pelo navegador da vítima)."""
@@ -172,7 +175,7 @@ index 14efa32..72f8c25 100644
                  return True
              host = (self.headers.get("Host") or "").strip().lower()
              name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
-@@ -716,7 +726,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -812,7 +822,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
  
          # -- autenticação ----------------------------------------------------------------------------
          def _role(self) -> str | None:
@@ -181,7 +184,7 @@ index 14efa32..72f8c25 100644
                  return "admin"
              return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
  
-@@ -729,9 +739,12 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -825,9 +835,12 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
              if self.headers.get("X-H50") != "1":
                  return False
              origin = self.headers.get("Origin")
@@ -197,7 +200,7 @@ index 14efa32..72f8c25 100644
  
          def _auth_api(self, method: str, path: str):
              body, err = self._read_json()
-@@ -741,7 +754,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -837,7 +850,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
              ip, secure = self._ip(), self._secure_cookie()
              try:
                  if path == "/api/auth/status" and method == "GET":
@@ -209,7 +212,7 @@ index 14efa32..72f8c25 100644
                  if path == "/api/auth/activity" and method == "GET":
                      if self._role() != "admin":
                          return self._send(401 if not self._authed() else 403, {"error": "só o administrador", "login": not self._authed()})
-@@ -775,6 +791,8 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -871,6 +887,8 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
  
          # -- roteamento ---------------------------------------------------------------------------------
          def _handle(self, method: str):
@@ -218,7 +221,7 @@ index 14efa32..72f8c25 100644
              if not self._host_ok():
                  return self._send(421, {"error": "nome de host não permitido (use localhost ou defina H50_ALLOWED_HOSTS)"})
              url = urlparse(self.path)
-@@ -908,10 +926,11 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -1004,10 +1022,11 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
  
  
  def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,

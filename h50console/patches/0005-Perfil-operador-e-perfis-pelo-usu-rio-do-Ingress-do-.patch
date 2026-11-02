@@ -1,7 +1,7 @@
-From e0903e3546f8b21645b344218b357f5ce111afd5 Mon Sep 17 00:00:00 2001
+From 2d3f93f4e41c606e3586c33834d3cb3894ad06b7 Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Fri, 23 Oct 2026 00:07:53 -0300
-Subject: [PATCH] =?UTF-8?q?Perfil=20operador=20e=20perfis=20pelo=20usu?=
+Subject: [PATCH 5/5] =?UTF-8?q?Perfil=20operador=20e=20perfis=20pelo=20usu?=
  =?UTF-8?q?=C3=A1rio=20do=20Ingress=20do=20HA?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -19,17 +19,20 @@ limpeza (2/4, 2/9, 2/10, 2/74, 2/8, 2/83). Ajustes, robôs, conta, backups e
 laboratório continuam só do administrador. A interface esconde o que o
 operador não usa e mostra com qual usuário ele entrou.
 
+Zonas: o operador limpa zonas e vê as salvas; salvar, apagar e o limite de
+zonas ficam com o administrador.
+
 Sem H50_INGRESS_OTHERS, nada muda (todo pedido do Ingress é administrador).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- h50console/__main__.py      |  9 +++-
- h50console/config.py        |  8 +++-
- h50console/static/app.js    | 13 ++++-
- h50console/static/style.css |  6 +++
- h50console/web.py           | 74 +++++++++++++++++++++++++----
- tests/test_auth.py          | 95 +++++++++++++++++++++++++++++++++++++
- 6 files changed, 191 insertions(+), 14 deletions(-)
+ h50console/__main__.py      |   9 +++-
+ h50console/config.py        |   8 ++-
+ h50console/static/app.js    |  13 ++++-
+ h50console/static/style.css |   6 +++
+ h50console/web.py           |  74 ++++++++++++++++++++++----
+ tests/test_auth.py          | 100 ++++++++++++++++++++++++++++++++++++
+ 6 files changed, 196 insertions(+), 14 deletions(-)
 
 diff --git a/h50console/__main__.py b/h50console/__main__.py
 index ef19218..ba75796 100644
@@ -96,10 +99,10 @@ index 1fd1e19..80880a5 100644
          )
  
 diff --git a/h50console/static/app.js b/h50console/static/app.js
-index 7809de7..0546091 100644
+index e5cc4b6..5d30f86 100644
 --- a/h50console/static/app.js
 +++ b/h50console/static/app.js
-@@ -335,7 +335,9 @@
+@@ -452,7 +452,9 @@
        b.onclick = () => openStation(id);
        return b;
      };
@@ -110,7 +113,7 @@ index 7809de7..0546091 100644
      let content;
      if (tab === "funcao") {
        const act = (label, name, on) => {
-@@ -722,7 +724,14 @@
+@@ -849,7 +851,14 @@
      const auth = await fetch(rel("/api/auth/status")).then((r) => r.json()).catch(() => ({ enabled: false }));
      $("#sec-card").hidden = !auth.enabled;
      document.body.classList.toggle("viewer", auth.role === "viewer");
@@ -127,28 +130,28 @@ index 7809de7..0546091 100644
      viewerCard.hidden = !(auth.enabled && auth.role === "admin");
      const viewerShow = (on) => { $("#viewer-state").textContent = on ? "Ligado" : "Desligado"; $("#viewer-off").hidden = !on; };
 diff --git a/h50console/static/style.css b/h50console/static/style.css
-index e8d226b..009051e 100644
+index 92675d8..627411c 100644
 --- a/h50console/static/style.css
 +++ b/h50console/static/style.css
 @@ -204,6 +204,12 @@ body.viewer #tabs a[href="#laboratorio"], body.viewer .home-side, body.viewer #h
  body.viewer #t-settings, body.viewer #notify-card, body.viewer #viewer-card, body.viewer #sec-pw, body.viewer #sec-all,
- body.viewer #map-edit, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
+ body.viewer #map-edit, body.viewer #zone-tools, body.viewer #onboarding, body.viewer #qr-start, body.viewer #cloud-connect .bar { display: none; }
  body.viewer .home { grid-template-columns: 1fr; }
 +/* operador (Ingress do HA): comanda o robô e escolhe os modos; o resto é do administrador */
 +body.operator #tabs a[href="#robos"], body.operator #tabs a[href="#diagnostico"], body.operator #tabs a[href="#manutencao"],
 +body.operator #tabs a[href="#laboratorio"], body.operator #hist-sync, body.operator #t-consumables button,
 +body.operator #t-settings, body.operator #notify-card, body.operator #viewer-card, body.operator #sec-pw,
-+body.operator #sec-all, body.operator #map-edit, body.operator #onboarding, body.operator #qr-start,
++body.operator #sec-all, body.operator #map-edit, body.operator #zone-save, body.operator .zone-dels, body.operator #onboarding, body.operator #qr-start,
 +body.operator #cloud-connect .bar { display: none; }
  .badge-viewer { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2, rgba(128,128,128,.18)); }
  td button { white-space: nowrap; }
  
 diff --git a/h50console/web.py b/h50console/web.py
-index 5e9fd1e..fadadd5 100644
+index c66b018..793cf64 100644
 --- a/h50console/web.py
 +++ b/h50console/web.py
 @@ -50,6 +50,16 @@ VIEWER_GET = re.compile(
-     r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status)")
+     r"|export/cleanings\.csv|dash/(cleanings|timeline|coverage)|faults|map|app|cloud/status|zones|zones/limit)")
  # único POST do visualizador: atualizar o mapa a partir da nuvem (só baixa; não mexe no robô)
  VIEWER_POST = re.compile(r"/api/r/[\w-]+/cloud/map")
 +# perfil operador (Ingress do HA, usuários que não são administradores): o que o visualizador vê, mais comandar o robô e
@@ -158,13 +161,13 @@ index 5e9fd1e..fadadd5 100644
 +OPERATOR_SETTINGS = ("2-4", "2-9", "2-10", "2-74", "2-8", "2-83")   # modo, sucção, água, caminho, passadas, atalho
 +_ROBOT_API = r"/api(?:/r/[\w-]+)?"
 +OPERATOR_POST = re.compile(_ROBOT_API + r"/(?:actions/(?:" + "|".join(map(re.escape, OPERATOR_ACTIONS)) + r")"
-+                           r"|clean/rooms|clean/custom/\d+|cloud/map)")
++                           r"|clean/rooms|clean/custom/\d+|clean/zones|cloud/map)")
 +OPERATOR_PUT = re.compile(_ROBOT_API + r"/settings/(?:" + "|".join(OPERATOR_SETTINGS) + r")")
 +INGRESS_ROLES = ("operator", "viewer")
  LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
  
  
-@@ -630,7 +640,10 @@ CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+@@ -726,7 +736,10 @@ CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
  
  def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool = False, local_only: bool = False,
                   extra_hosts=(), metrics_token: str = "", ingress: bool = False, ingress_only: bool = False,
@@ -176,7 +179,7 @@ index 5e9fd1e..fadadd5 100644
      streams = {"n": 0}
      streams_lock = threading.Lock()
      class Handler(BaseHTTPRequestHandler):
-@@ -734,8 +747,39 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -830,8 +843,39 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
              got = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
              return hmac.compare_digest(got.encode(), api_token.encode())
  
@@ -217,7 +220,7 @@ index 5e9fd1e..fadadd5 100644
                  return "admin"
              return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
  
-@@ -765,7 +809,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -861,7 +905,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                  if path == "/api/auth/status" and method == "GET":
                      st = auth.status(self._authed(), self._role())
                      if self._from_gateway():             # nunca mostra login/primeiro acesso dentro do HA
@@ -226,7 +229,7 @@ index 5e9fd1e..fadadd5 100644
                      return self._send(200, st)
                  if path == "/api/auth/activity" and method == "GET":
                      if self._role() != "admin":
-@@ -830,9 +874,15 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -926,9 +970,15 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                      return self._redirect(up + "login.html?next=" + quote("./" + self.path.lstrip("/"), safe=""))
                  if method != "GET" and not self._csrf_ok():
                      return self._send(403, {"error": "requisição bloqueada (CSRF)"})
@@ -245,7 +248,7 @@ index 5e9fd1e..fadadd5 100644
              if method == "GET" and path == "/api/stream":
                  return self._stream(hub.bus)                       # eventos da conta
              m = STREAM_PATH.fullmatch(path)
-@@ -857,9 +907,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -953,9 +1003,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                  return self._send(400, {"error": err})
              try:
                  result = hub.dispatch(method, path, parse_qs(url.query), body)
@@ -258,7 +261,7 @@ index 5e9fd1e..fadadd5 100644
                      keep = ("id", "name", "model", "online", "via", "status", "status_label", "battery", "active", "supported")
                      result = [{k: r[k] for k in keep if k in r} for r in result]
                  if isinstance(result, Raw):
-@@ -937,11 +988,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -1033,11 +1084,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
  def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,
                  cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "", ingress: bool = False,
                  ingress_only: bool = False, ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "",
@@ -276,10 +279,10 @@ index 5e9fd1e..fadadd5 100644
      srv.daemon_threads = True
      return srv
 diff --git a/tests/test_auth.py b/tests/test_auth.py
-index 5ac30a2..fef2ed0 100644
+index 5ac30a2..95189c5 100644
 --- a/tests/test_auth.py
 +++ b/tests/test_auth.py
-@@ -473,3 +473,98 @@ class IngressHttp(unittest.TestCase):
+@@ -473,3 +473,103 @@ class IngressHttp(unittest.TestCase):
          self.assertEqual(st, 401)
          self.assertEqual(r.getheader("X-Frame-Options"), "DENY")
          self.assertIn("frame-ancestors 'none'", r.getheader("Content-Security-Policy"))
@@ -342,6 +345,7 @@ index 5ac30a2..fef2ed0 100644
 +    def test_operator_commands_the_robot_but_does_not_configure(self):
 +        allowed = [("POST", "/api/r/sala/actions/start"), ("POST", "/api/actions/dust"), ("POST", "/api/r/sala/actions/home"),
 +                   ("POST", "/api/r/sala/clean/rooms"), ("POST", "/api/r/sala/clean/custom/2"),
++                   ("POST", "/api/r/sala/clean/zones"), ("GET", "/api/r/sala/zones"),
 +                   ("POST", "/api/r/sala/cloud/map"), ("PUT", "/api/r/sala/settings/2-9"), ("PUT", "/api/settings/2-4"),
 +                   ("PUT", "/api/r/sala/settings/2-83"), ("GET", "/api/r/sala/state"), ("GET", "/api/robots")]
 +        blocked = [("POST", "/api/robots"), ("DELETE", "/api/robots/sala"), ("PUT", "/api/robots/sala"),
@@ -351,7 +355,8 @@ index 5ac30a2..fef2ed0 100644
 +                   ("POST", "/api/cloud/qr"), ("POST", "/api/cloud/logout"), ("POST", "/api/r/sala/cloud/history"),
 +                   ("POST", "/api/r/sala/map/edit/save"), ("PUT", "/api/r/sala/app/name"), ("GET", "/api/r/sala/commands"),
 +                   ("POST", "/api/r/sala/actions/start/../../robots"), ("POST", "/api/auth/viewer"),
-+                   ("POST", "/api/auth/password")]
++                   ("POST", "/api/auth/password"), ("POST", "/api/r/sala/zones"), ("PUT", "/api/r/sala/zones/abcd1234"),
++                   ("DELETE", "/api/r/sala/zones/abcd1234"), ("PUT", "/api/r/sala/zones/limit")]
 +        for method, path in allowed:
 +            st, body = self.req(method, path, user="maria", body={} if method != "GET" else None)
 +            self.assertNotEqual(st, 403, (method, path, body))
@@ -366,6 +371,9 @@ index 5ac30a2..fef2ed0 100644
 +        self.s = s
 +        self.assertEqual(self.role(user="maria"), "viewer")
 +        self.assertEqual(self.req("POST", "/api/r/sala/actions/start", user="maria", body={})[0], 403)
++        self.assertEqual(self.req("POST", "/api/r/sala/clean/zones", user="maria", body={})[0], 403)
++        self.assertNotEqual(self.req("GET", "/api/r/sala/zones", user="maria")[0], 403)
++        self.assertNotEqual(self.req("GET", "/api/r/sala/zones/limit", user="maria")[0], 403)
 +        self.assertEqual(self.role(user="x", groups="system-admin"), "admin")
 +
 +    def test_config(self):

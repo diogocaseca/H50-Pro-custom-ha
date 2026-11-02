@@ -4,7 +4,8 @@ build_from:
   amd64: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
   armv7: ghcr.io/home-assistant/armv7-base-python:3.13-alpine3.22
 args:
-  # Commit (SHA completo) do original nathanabreu/H50-Pro-custom sobre o qual os patches de patches/ são aplicados.
+  # Commit (SHA completo) do fork diogocaseca/H50-Pro-custom (baseado em nathanabreu/H50-Pro-custom) sobre o qual os
+  # patches de patches/ são aplicados.
   # Ao mudar, os patches precisam aplicar sem conflito: use tools/update-upstream.sh <commit>, que testa, regera
   # patches/ e atualiza este valor. Depois suba `version` no config.yaml e registre no CHANGELOG.md.
-  H50_COMMIT: b982e7294ce5e546d5ec67c17bc3d97902365864
+  H50_COMMIT: 489be5dd2e91017d6bec5b25fc9bd3b364c13287

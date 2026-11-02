@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifica se o original (nathanabreu/H50-Pro-custom) tem commits depois do H50_COMMIT do build.yaml e se os nossos
+# Verifica se o fork (diogocaseca/H50-Pro-custom) tem commits depois do H50_COMMIT do build.yaml e se os nossos
 # patches ainda aplicam sobre o commit mais novo. Não altera nada neste repositório (a não ser com --update).
 #
 #   tools/check-upstream.sh            commits novos, arquivos alterados (os que os patches também mexem em destaque)
@@ -9,10 +9,10 @@
 #
 # Código de saída: 0 = em dia; 10 = há atualização e os patches aplicam; 11 = há atualização, mas algum patch não
 # aplica (use tools/update-upstream.sh e resolva o conflito); 1 = erro.
-# UPSTREAM_REPO troca a origem (URL ou caminho local); UPSTREAM_BRANCH, o branch (padrão: o principal do original).
+# UPSTREAM_REPO troca a origem (URL ou caminho local); UPSTREAM_BRANCH, o branch (padrão: o principal do fork).
 set -euo pipefail
 
-UPSTREAM_REPO=${UPSTREAM_REPO:-https://github.com/nathanabreu/H50-Pro-custom}
+UPSTREAM_REPO=${UPSTREAM_REPO:-https://github.com/diogocaseca/H50-Pro-custom}
 UPSTREAM_BRANCH=${UPSTREAM_BRANCH:-}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PATCHES=$ROOT/h50console/patches
@@ -39,7 +39,7 @@ latest=$(git ls-remote "$UPSTREAM_REPO" "${ref:-HEAD}" | awk 'NR==1 {print $1}')
 [ -n "$latest" ] || die "não consegui ler ${ref:-HEAD} de $UPSTREAM_REPO"
 
 if [ "$latest" = "$current" ]; then
-    [ "$quiet" = 1 ] && echo "em dia: ${current:0:7}" || echo "Em dia: o original continua em ${current:0:7} (H50_COMMIT do build.yaml)."
+    [ "$quiet" = 1 ] && echo "em dia: ${current:0:7}" || echo "Em dia: o fork continua em ${current:0:7} (H50_COMMIT do build.yaml)."
     exit 0
 fi
 
@@ -47,12 +47,12 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/h50-check.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 git clone -q "$UPSTREAM_REPO" "$work/up"
 up() { git -C "$work/up" "$@"; }
-up cat-file -e "$current^{commit}" 2>/dev/null || die "o commit atual ${current:0:7} não existe mais no original"
+up cat-file -e "$current^{commit}" 2>/dev/null || die "o commit atual ${current:0:7} não existe mais no fork"
 
 n=$(up rev-list --count "$current..$latest")
-say "Há atualização no original: ${current:0:7} -> ${latest:0:7} ($n commit(s) novo(s))."
+say "Há atualização no fork: ${current:0:7} -> ${latest:0:7} ($n commit(s) novo(s))."
 if ! up merge-base --is-ancestor "$current" "$latest"; then
-    say "ATENÇÃO: ${current:0:7} não é ancestral de ${latest:0:7} (o histórico do original foi reescrito)."
+    say "ATENÇÃO: ${current:0:7} não é ancestral de ${latest:0:7} (o histórico do fork foi reescrito)."
 fi
 
 if [ "$quiet" = 0 ]; then

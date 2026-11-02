@@ -1,7 +1,7 @@
-From 6b71f3797921e7938e28ba665e2e70021a1ccd10 Mon Sep 17 00:00:00 2001
+From 50ed554963da56583224944927b7a8a348e27218 Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Thu, 22 Oct 2026 23:39:06 -0300
-Subject: [PATCH] API local por token (H50_API_TOKEN)
+Subject: [PATCH 4/5] API local por token (H50_API_TOKEN)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -71,10 +71,10 @@ index 33839f9..1fd1e19 100644
          )
  
 diff --git a/h50console/web.py b/h50console/web.py
-index 72f8c25..5e9fd1e 100644
+index 0ddb339..c66b018 100644
 --- a/h50console/web.py
 +++ b/h50console/web.py
-@@ -622,12 +622,15 @@ CSP = ("default-src 'self'; img-src 'self' data: https://*.xiaomi.com; style-src
+@@ -718,12 +718,15 @@ CSP = ("default-src 'self'; img-src 'self' data: https://*.xiaomi.com; style-src
  # Ingress do Home Assistant: o Supervisor repassa os pedidos (já autenticados pelo HA) sempre deste IP, e o painel abre
  # num iframe da mesma origem do HA. Só as respostas a ele mudam o enquadramento.
  INGRESS_GATEWAY = "172.30.32.2"
@@ -91,7 +91,7 @@ index 72f8c25..5e9fd1e 100644
      streams = {"n": 0}
      streams_lock = threading.Lock()
      class Handler(BaseHTTPRequestHandler):
-@@ -725,8 +728,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -821,8 +824,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                  return None, "JSON inválido"
  
          # -- autenticação ----------------------------------------------------------------------------
@@ -107,7 +107,7 @@ index 72f8c25..5e9fd1e 100644
                  return "admin"
              return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
  
-@@ -927,10 +936,12 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -1023,10 +1032,12 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
  
  def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,
                  cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "", ingress: bool = False,
