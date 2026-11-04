@@ -85,7 +85,16 @@ class Mapping(unittest.TestCase):
         self.assertTrue(cs(5, True))                             # pausado continua
         self.assertTrue(cs(7, True))                             # lavando o mop no meio da limpeza
         self.assertTrue(cs(20, True))                            # voltando no meio da rota
-        self.assertFalse(cs(6, True))                            # voltando para a base: fim
+        self.assertTrue(cs(6, True))                             # voltando para a base no fim: espera chegar
+        self.assertTrue(cs(24, True))
+        self.assertFalse(cs(14, True))                           # chegou à base (carregando): fim
+        self.assertFalse(cs(2, True))
+        self.assertFalse(cs(6, False))                           # mandou voltar com o robô parado fora da base
+        self.assertFalse(cs(7, True, last_status=6))             # chegou e lava o mop: a limpeza acabou
+        self.assertFalse(cs(12, True, last_status=24))
+        self.assertTrue(cs(7, True, last_status=20))             # lavagem no meio da limpeza continua
+        self.assertTrue(cs(6, True, last_status=6))
+        self.assertTrue(cs(None, True, last_status=6))           # fora do ar na volta: mantém
         self.assertFalse(cs(7, False))                           # lavando o mop depois do fim
         self.assertFalse(cs(12, False))                          # base preparando o mop antes de sair
         self.assertFalse(cs(9, True))
@@ -267,13 +276,14 @@ class BridgeTests(unittest.TestCase):
     def test_cleaning_flag_follows_the_session(self):
         self.bridge.on_connect()
         seen = []
-        for status, progress in ((9, -1), (12, -1), (4, 10), (7, 30), (20, 40), (16, 60), (6, 100), (7, -1), (9, -1)):
+        for status, progress in ((9, -1), (12, -1), (4, 10), (7, 30), (20, 40), (16, 60), (6, 100), (6, 100), (7, -1),
+                                 (9, -1)):
             self.api.state.update(status=status)
             self.api.state["values"].update({"2/2": status, "2/89": progress})
             self.bridge.dirty.add("sala")
             self.bridge.tick()
             seen.append(json.loads(self.published()["h50console/sala/attrs"])["cleaning"])
-        self.assertEqual(seen, [False, False, True, True, True, True, False, False, False])
+        self.assertEqual(seen, [False, False, True, True, True, True, True, True, False, False])   # desliga ao chegar
         disc = json.loads(self.published()["homeassistant/device/h50console_123456/config"])
         self.assertEqual((disc["cmps"]["cleaning"]["p"], disc["cmps"]["cleaning"]["dev_cla"]), ("binary_sensor", "running"))
 

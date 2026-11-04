@@ -40,9 +40,13 @@ HA_STATE = {
     **dict.fromkeys((1, 8, 11, 13), "idle"),
 }
 PAUSED = 5
-# 2/2 -> "Limpeza em andamento": liga no início e só desliga no fim, mesmo com idas à base no meio da limpeza
+# 2/2 -> "Limpeza em andamento": liga no início e só desliga quando o robô chega à base no fim, mesmo com idas à base
+# no meio da limpeza
 SESSION_ON = {4, 16, 17, 5, 3, 19, 20}      # limpando, pausado, carregando/voltando para retomar, voltando no meio
-SESSION_KEEP = {7, 12, 13}                  # lavando o mop, base trabalhando, trocando de tarefa: antes, no meio ou depois
+# lavando o mop, base trabalhando, trocando de tarefa (antes, no meio ou depois) e voltando para a base no fim: só
+# ligam se já estava ligado, assim mandar voltar com o robô parado fora da base não liga o sensor
+RETURNING_END = {6, 21, 24}                 # voltando para a base, do mapeamento, para carregar
+SESSION_KEEP = {7, 12, 13} | RETURNING_END
 
 # Enums usados nas entidades (mesmos textos do painel: catalog.ENUM_PT; um teste confere que não divergiram)
 FAN_SPEED = {1: "Silencioso", 2: "Padrão", 3: "Intenso", 4: "Turbo"}                                       # 2/9
@@ -81,11 +85,15 @@ def ha_state(status) -> str:
     return HA_STATE.get(status, "idle" if status is not None else "error")
 
 
-def cleaning_session(status, previous: bool | None, progress=None) -> bool:
+def cleaning_session(status, previous: bool | None, progress=None, last_status=None) -> bool:
     """Limpeza em andamento? Nos status ambíguos vale o valor anterior; sem anterior (ponte reiniciou), o progresso
-    da limpeza (2/89 = -1 quando não há limpeza). Status desconhecido (robô fora do ar) também mantém o anterior."""
+    da limpeza (2/89 = -1 quando não há limpeza). Status desconhecido (robô fora do ar) também mantém o anterior.
+    Vindo da volta para a base no fim (`last_status`), qualquer outro status é a chegada: a lavagem final do mop não
+    conta como limpeza."""
     if status in SESSION_ON:
         return True
+    if last_status in RETURNING_END and status is not None and status not in RETURNING_END:
+        return False
     if status in SESSION_KEEP or status is None:
         if previous is not None:
             return previous
@@ -555,9 +563,9 @@ class Bridge:
             self._pub(topics(rid)["availability"], "offline")
             return
         online = bool((state.get("health") or {}).get("online")) and state.get("status") is not None
-        self.status[rid] = state.get("status")
+        last_status, self.status[rid] = self.status.get(rid), state.get("status")
         cleaning = cleaning_session(state.get("status") if online else None, self.cleaning.get(rid),
-                                    (state.get("values") or {}).get("2/89"))
+                                    (state.get("values") or {}).get("2/89"), last_status)
         if cleaning != self.cleaning.get(rid, False):
             log.info("robô %s: limpeza %s", rid, "começou" if cleaning else "terminou")
         self.cleaning[rid] = cleaning
