@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4
+
+- Sensor **Limpeza em andamento** (MQTT): continua ligado enquanto o robô volta para a base no fim da limpeza e só
+  desliga quando ele chega, mesmo que a base comece a lavar o mop logo em seguida. Antes desligava no momento em que
+  ele começava a voltar. Mandar voltar com o robô parado fora da base não liga o sensor.
+
 ## 0.5.3
 
 - O código do painel agora vem do fork [diogocaseca/H50-Pro-custom](https://github.com/diogocaseca/H50-Pro-custom),
