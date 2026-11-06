@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.5
+
+- Sem internet, o robô responde vazio nas rotinas, cômodos, agendamentos e mapas e põe todos os consumíveis em 100 %.
+  O painel passa a manter os últimos valores conhecidos nesses casos: as rotinas (e os botões delas no HA) não somem
+  mais quando a internet cai, e a previsão dos consumíveis não é estragada. O log avisa o que foi mantido e quando o
+  valor real volta.
+- Sem internet, os "erro no ciclo do poller" saem do log: a falha da nuvem é tratada como robô sem resposta e a leitura
+  volta para a rede local assim que ela responder.
+- Laboratório → Mudanças: janelas de 3 e 7 dias, e as mudanças antigas da janela não somem mais atrás do que muda
+  sozinho (progresso da secagem, bateria).
+
 ## 0.5.4
 
 - Sensor **Limpeza em andamento** (MQTT): continua ligado enquanto o robô volta para a base no fim da limpeza e só
