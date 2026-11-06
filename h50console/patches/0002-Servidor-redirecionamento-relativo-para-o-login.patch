@@ -1,4 +1,4 @@
-From 3ec89a4f612637a457a336b5ec3d98b090754bfb Mon Sep 17 00:00:00 2001
+From ab5977be5cec5a259f04cf32382fa6c483e3dcab Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Thu, 22 Oct 2026 22:30:47 -0300
 Subject: [PATCH 2/5] Servidor: redirecionamento relativo para o login
@@ -16,10 +16,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/h50console/web.py b/h50console/web.py
-index 78d7285..d821864 100644
+index e547e29..541ce44 100644
 --- a/h50console/web.py
 +++ b/h50console/web.py
-@@ -894,7 +894,9 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -896,7 +896,9 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                  if not self._authed():
                      if path.startswith("/api/"):
                          return self._send(401, {"error": "login necessário", "login": True})

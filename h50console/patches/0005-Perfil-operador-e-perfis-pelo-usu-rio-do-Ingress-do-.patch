@@ -1,4 +1,4 @@
-From 2d3f93f4e41c606e3586c33834d3cb3894ad06b7 Mon Sep 17 00:00:00 2001
+From 10712cc4221ae91b4c3422d7d0818f9729e2bb84 Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Fri, 23 Oct 2026 00:07:53 -0300
 Subject: [PATCH 5/5] =?UTF-8?q?Perfil=20operador=20e=20perfis=20pelo=20usu?=
@@ -147,7 +147,7 @@ index 92675d8..627411c 100644
  td button { white-space: nowrap; }
  
 diff --git a/h50console/web.py b/h50console/web.py
-index c66b018..793cf64 100644
+index 5451d86..8e80455 100644
 --- a/h50console/web.py
 +++ b/h50console/web.py
 @@ -50,6 +50,16 @@ VIEWER_GET = re.compile(
@@ -167,7 +167,7 @@ index c66b018..793cf64 100644
  LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
  
  
-@@ -726,7 +736,10 @@ CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
+@@ -728,7 +738,10 @@ CSP_INGRESS = CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
  
  def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool = False, local_only: bool = False,
                   extra_hosts=(), metrics_token: str = "", ingress: bool = False, ingress_only: bool = False,
@@ -179,7 +179,7 @@ index c66b018..793cf64 100644
      streams = {"n": 0}
      streams_lock = threading.Lock()
      class Handler(BaseHTTPRequestHandler):
-@@ -830,8 +843,39 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -832,8 +845,39 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
              got = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
              return hmac.compare_digest(got.encode(), api_token.encode())
  
@@ -220,7 +220,7 @@ index c66b018..793cf64 100644
                  return "admin"
              return auth.role_of(auth.token_from_cookie_header(self.headers.get("Cookie")))
  
-@@ -861,7 +905,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -863,7 +907,7 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                  if path == "/api/auth/status" and method == "GET":
                      st = auth.status(self._authed(), self._role())
                      if self._from_gateway():             # nunca mostra login/primeiro acesso dentro do HA
@@ -229,7 +229,7 @@ index c66b018..793cf64 100644
                      return self._send(200, st)
                  if path == "/api/auth/activity" and method == "GET":
                      if self._role() != "admin":
-@@ -926,9 +970,15 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -928,9 +972,15 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                      return self._redirect(up + "login.html?next=" + quote("./" + self.path.lstrip("/"), safe=""))
                  if method != "GET" and not self._csrf_ok():
                      return self._send(403, {"error": "requisição bloqueada (CSRF)"})
@@ -248,7 +248,7 @@ index c66b018..793cf64 100644
              if method == "GET" and path == "/api/stream":
                  return self._stream(hub.bus)                       # eventos da conta
              m = STREAM_PATH.fullmatch(path)
-@@ -953,9 +1003,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -955,9 +1005,10 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
                  return self._send(400, {"error": err})
              try:
                  result = hub.dispatch(method, path, parse_qs(url.query), body)
@@ -261,7 +261,7 @@ index c66b018..793cf64 100644
                      keep = ("id", "name", "model", "online", "via", "status", "status_label", "battery", "active", "supported")
                      result = [{k: r[k] for k in keep if k in r} for r in result]
                  if isinstance(result, Raw):
-@@ -1033,11 +1084,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
+@@ -1035,11 +1086,14 @@ def make_handler(hub, auth=None, trust_proxy: bool = False, cookie_secure: bool
  def make_server(hub, host: str = "127.0.0.1", port: int = 8050, auth=None, trust_proxy: bool = False,
                  cookie_secure: bool = False, extra_hosts=(), metrics_token: str = "", ingress: bool = False,
                  ingress_only: bool = False, ingress_gateway: str = INGRESS_GATEWAY, api_token: str = "",
