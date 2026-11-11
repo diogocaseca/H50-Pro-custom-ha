@@ -1,4 +1,4 @@
-From cfdb5f9706bce8326c94c63db0541119d7302cbd Mon Sep 17 00:00:00 2001
+From 3f63a22961ec0b430bccf1f327f6d5fdbb90e1bd Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Thu, 22 Oct 2026 22:32:53 -0300
 Subject: [PATCH 3/5] Modo Ingress do Home Assistant (opt-in: H50_INGRESS=true)
@@ -102,10 +102,10 @@ index e441fa4..33839f9 100644
          )
  
 diff --git a/h50console/static/app.js b/h50console/static/app.js
-index 752b521..e5cc4b6 100644
+index 154f133..674cda9 100644
 --- a/h50console/static/app.js
 +++ b/h50console/static/app.js
-@@ -873,6 +873,7 @@
+@@ -876,6 +876,7 @@
          confirm: async () => { await api("POST", "/api/auth/password", { current: cur.value, new: nw.value }); toast("Senha alterada"); },
        });
      };

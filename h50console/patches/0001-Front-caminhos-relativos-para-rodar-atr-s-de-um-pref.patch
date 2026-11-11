@@ -1,4 +1,4 @@
-From 5874d20ea1a1d7b021bdcd1f8129573069b01bee Mon Sep 17 00:00:00 2001
+From 2c8c1e78cc1e8dc5256c454b1602906c015dd32d Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Thu, 22 Oct 2026 22:30:47 -0300
 Subject: [PATCH 1/5] =?UTF-8?q?Front:=20caminhos=20relativos=20para=20roda?=
@@ -25,7 +25,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  7 files changed, 34 insertions(+), 29 deletions(-)
 
 diff --git a/h50console/static/app.js b/h50console/static/app.js
-index 7ce1563..752b521 100644
+index 57cd7b6..154f133 100644
 --- a/h50console/static/app.js
 +++ b/h50console/static/app.js
 @@ -10,11 +10,14 @@
@@ -53,7 +53,7 @@ index 7ce1563..752b521 100644
        throw new Error("login necessário");
      }
      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-@@ -724,12 +727,12 @@
+@@ -727,12 +730,12 @@
    function connect() {
      for (const s of streams) s.close();
      streams = [];
@@ -68,7 +68,7 @@ index 7ce1563..752b521 100644
      streams.push(es);
      es.addEventListener("state", async (e) => {
        const d = JSON.parse(e.data || "{}");
-@@ -843,7 +846,7 @@
+@@ -846,7 +849,7 @@
      });
  
      // segurança: senha e sessões
@@ -77,7 +77,7 @@ index 7ce1563..752b521 100644
      $("#sec-card").hidden = !auth.enabled;
      document.body.classList.toggle("viewer", auth.role === "viewer");
      if (auth.role === "viewer") $("#sec-note").textContent = "Você entrou com o perfil somente leitura.";
-@@ -870,7 +873,7 @@
+@@ -873,7 +876,7 @@
          confirm: async () => { await api("POST", "/api/auth/password", { current: cur.value, new: nw.value }); toast("Senha alterada"); },
        });
      };
@@ -86,7 +86,7 @@ index 7ce1563..752b521 100644
      $("#sec-all").onclick = () => confirmAction("Sair de todos os aparelhos? Este também continua conectado.",
        () => run("Sair de todos", () => api("POST", "/api/auth/revoke", {})));
  
-@@ -897,13 +900,13 @@
+@@ -900,13 +903,13 @@
      if (sheets[qs.get("sheet")]) await sheets[qs.get("sheet")]();
      if (!qs.has("static")) {
        connect();

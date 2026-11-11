@@ -8,4 +8,4 @@ args:
   # patches de patches/ são aplicados.
   # Ao mudar, os patches precisam aplicar sem conflito: use tools/update-upstream.sh <commit>, que testa, regera
   # patches/ e atualiza este valor. Depois suba `version` no config.yaml e registre no CHANGELOG.md.
-  H50_COMMIT: 751809896f6d229aaafeeb85df5c53a02a71697f
+  H50_COMMIT: 1d1e7568c31bc1df7fd3182e7c83640d4c0af7d2

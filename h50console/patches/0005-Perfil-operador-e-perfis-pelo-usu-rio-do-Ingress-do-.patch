@@ -1,4 +1,4 @@
-From 10712cc4221ae91b4c3422d7d0818f9729e2bb84 Mon Sep 17 00:00:00 2001
+From bf19cf94fd188b510d58c2b3b0f5bd2a1c788566 Mon Sep 17 00:00:00 2001
 From: Diogo Caseca <diogofcaseca@gmail.com>
 Date: Fri, 23 Oct 2026 00:07:53 -0300
 Subject: [PATCH 5/5] =?UTF-8?q?Perfil=20operador=20e=20perfis=20pelo=20usu?=
@@ -99,10 +99,10 @@ index 1fd1e19..80880a5 100644
          )
  
 diff --git a/h50console/static/app.js b/h50console/static/app.js
-index e5cc4b6..5d30f86 100644
+index 674cda9..0338652 100644
 --- a/h50console/static/app.js
 +++ b/h50console/static/app.js
-@@ -452,7 +452,9 @@
+@@ -455,7 +455,9 @@
        b.onclick = () => openStation(id);
        return b;
      };
@@ -113,7 +113,7 @@ index e5cc4b6..5d30f86 100644
      let content;
      if (tab === "funcao") {
        const act = (label, name, on) => {
-@@ -849,7 +851,14 @@
+@@ -852,7 +854,14 @@
      const auth = await fetch(rel("/api/auth/status")).then((r) => r.json()).catch(() => ({ enabled: false }));
      $("#sec-card").hidden = !auth.enabled;
      document.body.classList.toggle("viewer", auth.role === "viewer");
