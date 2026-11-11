@@ -60,7 +60,8 @@ class Mapping(unittest.TestCase):
 
     def test_drying(self):
         self.assertTrue(mb.drying({"2/18": '{"mode":1,"progress":0}', "2/90": 0}))       # base secando
-        self.assertTrue(mb.drying({"2/18": '{"mode":0}', "2/90": 30}))                   # ainda faltam minutos
+        self.assertFalse(mb.drying({"2/18": '{"mode":0}', "2/90": 30}))                  # interrompida: 2/90 sobra
+        self.assertTrue(mb.drying({"2/18": "{}", "2/90": 30}))                           # sem o modo: vale o 2/90
         self.assertFalse(mb.drying({"2/18": '{"mode":3,"progress":50}', "2/90": 0}))     # lavando o mop
         self.assertFalse(mb.drying({"2/18": '{"mode":0,"progress":0}', "2/90": 0}))
         self.assertFalse(mb.drying({"2/18": "lixo", "2/90": None}))
@@ -76,6 +77,10 @@ class Mapping(unittest.TestCase):
         self.assertEqual(mb.drying_percent({**dry, "2/88": 40, "2/31": 1, "2/90": 100}), 40)   # 2/88 preenchido vale
         self.assertIsNone(mb.drying_percent({**dry, "2/90": 30}))                        # sem a duração
         self.assertEqual(mb.drying_percent({"2/18": '{"mode":0}', "2/88": 0, "2/90": 0, "2/31": 1}), 0)
+        self.assertEqual(mb.drying_percent({"2/18": '{"mode":1,"progress":16}', "2/31": 2, "2/90": 150}), 16)
+        self.assertEqual(mb.drying_percent({"2/18": '{"mode":0,"progress":0}', "2/31": 2, "2/90": 150}), 0)
+        stopped = mb.attrs_payload({"values": {"2/18": '{"mode":0,"progress":0}', "2/90": 150}})
+        self.assertEqual((stopped["drying"], stopped["drying_left"], stopped["drying_progress"]), (False, 0, 0))
 
     def test_cleaning_session(self):
         self.assertTrue((mb.SESSION_ON | mb.SESSION_KEEP) <= set(catalog.STATUS))

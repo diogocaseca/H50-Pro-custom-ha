@@ -101,27 +101,40 @@ def cleaning_session(status, previous: bool | None, progress=None, last_status=N
     return False
 
 
-def drying(values: dict) -> bool:
-    """Secagem dos mops em andamento: a base informa o modo 1 (Secando) no 2/18, ou ainda faltam minutos no 2/90."""
+def _base(values: dict) -> dict | None:
+    """2/18 -> {"mode", "progress"}, ou None se não veio (ou veio sem o modo)."""
     try:
         base = json.loads(values.get("2/18") or "{}")
     except (TypeError, ValueError):
-        base = {}
+        return None
+    return base if isinstance(base, dict) and "mode" in base else None
+
+
+def drying(values: dict) -> bool:
+    """Secagem dos mops em andamento: a base informa o modo 1 (Secando) no 2/18. Interrompida (ao mandar limpar, por
+    exemplo), a base sai do modo 1 e o 2/90 (minutos restantes) fica com o último valor: ele só vale sem o 2/18."""
+    base = _base(values)
+    if base is not None:
+        return base["mode"] == 1
     left = _num(values.get("2/90"))
-    return (isinstance(base, dict) and base.get("mode") == 1) or bool(left and left > 0)
+    return bool(left and left > 0)
 
 
 DRY_MINUTES = {1: 120, 2: 180, 3: 240}      # 2/31 Duração da secagem: 2 h, 3 h, 4 h
 
 
 def drying_percent(values: dict):
-    """% da secagem dos mops. O H50 Pro deixa o 2/88 em 0 durante a secagem e só informa os minutos restantes
-    (2/90), então a conta usa a duração escolhida (2/31). Se o 2/88 vier preenchido, vale ele. Fora da secagem: 0."""
+    """% da secagem dos mops. O H50 Pro deixa o 2/88 em 0; secando, o progresso do 2/18 é a % (1 a 100). Sem ele, a
+    conta usa os minutos restantes (2/90) e a duração escolhida (2/31). Se o 2/88 vier preenchido, vale ele. Fora da
+    secagem: 0. Mesma regra de decoders.drying_percent do painel."""
     reported = _num(values.get("2/88"))
     if reported and reported > 0:
         return reported
     if not drying(values):
         return 0
+    progress = _num((_base(values) or {}).get("progress"))
+    if progress and progress > 0:
+        return max(0, min(100, round(progress)))
     total, left = DRY_MINUTES.get(values.get("2/31")), _num(values.get("2/90"))
     if not total or left is None:
         return None                                  # secando, mas sem dados para calcular
@@ -155,7 +168,7 @@ def attrs_payload(state: dict, cleaning: bool = False) -> dict:
         "area": None if area is None else round(area / 100, 2),                   # 2/6 vem em 0,01 m²
         "duration": _num(v.get("2/7")),
         "drying_progress": drying_percent(v),                                     # secagem dos mops (base)
-        "drying_left": _num(v.get("2/90")),                                       # minutos restantes da secagem
+        "drying_left": _num(v.get("2/90")) if drying(v) else 0,                   # minutos restantes da secagem
         "drying": drying(v),
         "fault": None if fault is None else ("Nenhuma" if fault == 0 else str(fault)),
         "dirty_tank_full": bool(v.get("2/97")),
