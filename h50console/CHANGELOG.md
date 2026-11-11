@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.6
+
+- Correção: ao interromper a secagem dos mops (por exemplo, mandando limpar), o sensor **Secagem em andamento**
+  continuava ligado e a **Secagem restante** mostrava os minutos de antes. O robô sai do modo "secando" mas não zera os
+  minutos restantes; agora vale o modo da base.
+- A porcentagem da secagem (painel e sensor **Progresso da secagem**) passa a ser a que o próprio robô informa.
+
 ## 0.5.5
 
 - Sem internet, o robô responde vazio nas rotinas, cômodos, agendamentos e mapas e põe todos os consumíveis em 100 %.
