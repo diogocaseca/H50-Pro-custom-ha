@@ -46,3 +46,8 @@ configuration:
     description: Só mude se alterou o prefixo na integração MQTT do Home Assistant (padrão homeassistant).
   log_level:
     name: Nível de log
+  lab_write:
+    name: "Laboratório: permitir escrita no robô"
+    description: >-
+      Libera, só para administradores, as ações e a gravação de propriedades da aba Laboratório. Serve para
+      experimentos; pode alterar ou apagar configurações salvas no robô. Deixe desligado no uso normal.

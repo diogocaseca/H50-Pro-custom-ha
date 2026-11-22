@@ -59,6 +59,7 @@ e, nos comandos de limpeza, se o robô saiu da base (**Confirmado**). Se ele nã
 | `mqtt_user` / `mqtt_password` | vazio | Usuário e senha do broker. Vazio = o app tenta o usuário que o Supervisor fornece |
 | `mqtt_discovery_prefix` | `homeassistant` | Prefixo do MQTT discovery. Só mude se alterou na integração MQTT do HA |
 | `log_level` | `info` | `debug`, `info`, `warning` ou `error` |
+| `lab_write` | desligado | Libera as **ações** e a **gravação de propriedades** da aba Laboratório (só administradores). É para experimentos: algumas ações alteram ou apagam configurações salvas no robô. Deixe desligado no uso normal |
 
 ### Acesso direto (opcional)
 

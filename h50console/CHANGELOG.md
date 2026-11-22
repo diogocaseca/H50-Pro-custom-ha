@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.7
+
+- Nova opção **Laboratório: permitir escrita no robô** (`lab_write`, desligada por padrão). Libera, só para
+  administradores, as ações e a gravação de propriedades da aba Laboratório, para experimentos como criar uma limpeza
+  personalizada pelo painel. Algumas ações alteram ou apagam configurações salvas no robô: deixe desligada no uso
+  normal.
+
 ## 0.5.6
 
 - Correção: ao interromper a secagem dos mops (por exemplo, mandando limpar), o sensor **Secagem em andamento**

@@ -45,3 +45,8 @@ configuration:
     description: Only change it if you changed the prefix in the Home Assistant MQTT integration (default homeassistant).
   log_level:
     name: Log level
+  lab_write:
+    name: "Lab: allow writing to the robot"
+    description: >-
+      Lets administrators run actions and write properties from the Lab tab. Meant for experiments; it can change or
+      delete settings saved on the robot. Keep it off for normal use.
