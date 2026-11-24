@@ -43,6 +43,12 @@ se ela não responder: a nuvem já aceitou comando que não chegou ao robô.
 Na aba **Diagnóstico**, a tabela **Comandos enviados** mostra por onde cada comando foi (**Via**: rede local ou nuvem)
 e, nos comandos de limpeza, se o robô saiu da base (**Confirmado**). Se ele não sair em 1 minuto, o painel avisa.
 
+**Temporário:** em **Diagnóstico → Log das limpezas**, o administrador baixa um arquivo `.json` (7, 30 ou 90 dias) com
+as limpezas do Histórico e tudo o que o robô informou durante cada uma, com os valores completos. Serve para estudar as
+rotinas com modos diferentes por cômodo (que o painel ainda não roda). Só lê o que o painel já guardou e não manda nada
+ao robô. O arquivo traz nomes de cômodos e rotinas e os comandos enviados, mas nenhuma senha nem dado da conta Xiaomi.
+Sai numa próxima versão.
+
 ## Opções
 
 | Opção | Padrão | O que faz |

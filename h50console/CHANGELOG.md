@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.9
+
+- **Temporário:** botão **Baixar log das limpezas** em Diagnóstico (só administrador). Gera um arquivo com as limpezas
+  do período (7, 30 ou 90 dias) e tudo o que o robô informou durante cada uma, com os valores completos, para estudar as
+  rotinas com modos diferentes por cômodo. Só lê o que o painel já guardou; não manda nada ao robô. Sai quando essa
+  tarefa terminar.
+
 ## 0.5.8
 
 - Removida a opção **Laboratório: permitir escrita no robô** (`lab_write`). Os testes mostraram que não dá para criar
