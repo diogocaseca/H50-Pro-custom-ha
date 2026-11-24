@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.8
+
+- Removida a opção **Laboratório: permitir escrita no robô** (`lab_write`). Os testes mostraram que não dá para criar
+  limpezas personalizadas pelo painel: o robô aceita os comandos, mas não cria a rotina, e o de modificar chegou a
+  apagar uma. O Laboratório volta a ser só leitura.
+
 ## 0.5.7
 
 - Nova opção **Laboratório: permitir escrita no robô** (`lab_write`, desligada por padrão). Libera, só para

@@ -48,11 +48,7 @@ env.update({
     "H50_INGRESS_ADMINS": ",".join(str(a).strip() for a in (opts.get("admins") or []) if str(a).strip()),
     "H50_INGRESS_OTHERS": str(opts.get("others") or "operator"),
 })
-# Laboratório: ações e escrita de props direto no robô (experimentos). Só administradores usam o Laboratório.
-if opts.get("lab_write"):
-    env["RAW_ENABLED"] = "true"
-else:
-    env.pop("RAW_ENABLED", None)
+env.pop("RAW_ENABLED", None)   # Laboratório só leitura: ações e escrita de props no robô ficam bloqueadas
 if not opts.get("direct_access"):
     env["H50_INGRESS_ONLY"] = "true"   # rede do host: sem isto a porta 8050 ficaria aberta na LAN
 for opt, var in (("password", "H50_PASSWORD"), ("viewer_password", "H50_VIEWER_PASSWORD")):
@@ -63,8 +59,7 @@ for opt, var in (("password", "H50_PASSWORD"), ("viewer_password", "H50_VIEWER_P
 env.pop("H50_API_TOKEN", None)
 
 print(f"H50 Console: Ingress ligado; acesso direto pela porta {PORT} {'LIGADO (exige senha)' if opts.get('direct_access') else 'desligado'}"
-      f"; MQTT {'ligado' if opts.get('mqtt') else 'desligado'}"
-      f"{'; Laboratório com ESCRITA LIGADA (lab_write)' if opts.get('lab_write') else ''}", flush=True)
+      f"; MQTT {'ligado' if opts.get('mqtt') else 'desligado'}", flush=True)
 os.chdir("/data")                      # o app lê um .env opcional da pasta atual: nunca o da imagem
 panel = [sys.executable, "-m", "h50console"]
 
