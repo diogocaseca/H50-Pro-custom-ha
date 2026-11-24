@@ -1,0 +1,262 @@
+From 5a5e3df4955e9940069231ab29cab83f13e1d86c Mon Sep 17 00:00:00 2001
+From: Diogo Caseca <diogofcaseca@gmail.com>
+Date: Tue, 24 Nov 2026 15:30:04 -0300
+Subject: [PATCH] =?UTF-8?q?TEMPOR=C3=81RIO:=20log=20das=20limpezas=20em=20?=
+ =?UTF-8?q?Diagn=C3=B3stico?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Botão "Baixar log das limpezas" (7, 30 ou 90 dias), só para administrador:
+um JSON com as limpezas do Histórico, todas as mudanças de propriedade em
+volta de cada uma (valores completos), todo 2/40 e 2/42 do período, os
+comandos enviados e o estado atual. Serve para estudar as rotinas com
+modos diferentes por cômodo; só lê o banco e não manda nada ao robô.
+Sai quando essa tarefa terminar.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ h50console/routine_log.py    | 79 ++++++++++++++++++++++++++++++++++++
+ h50console/static/index.html |  6 +++
+ h50console/static/tmplog.js  |  6 +++
+ h50console/web.py            | 12 +++++-
+ tests/test_cleaning_log.py   | 68 +++++++++++++++++++++++++++++++
+ 5 files changed, 170 insertions(+), 1 deletion(-)
+ create mode 100644 h50console/routine_log.py
+ create mode 100644 h50console/static/tmplog.js
+ create mode 100644 tests/test_cleaning_log.py
+
+diff --git a/h50console/routine_log.py b/h50console/routine_log.py
+new file mode 100644
+index 0000000..19d6880
+--- /dev/null
++++ b/h50console/routine_log.py
+@@ -0,0 +1,79 @@
++"""TEMPORÁRIO (app do Home Assistant, patch 0006): log das limpezas para estudar as rotinas com modos diferentes por
++cômodo. Junta, com os valores completos, o que o painel já guardou: as limpezas do Histórico, as mudanças de propriedade
++em volta de cada uma, todo 2/40 do período e os comandos enviados. Só lê o banco; não manda nada ao robô.
++Sai do app quando essa tarefa terminar.
++"""
++
++from __future__ import annotations
++
++import json
++from datetime import datetime, timedelta, timezone
++
++from . import catalog
++from .store import Store, iso, utcnow
++
++DAYS = (7, 30, 90)
++BEFORE_S = 120                    # mudanças de 2 min antes do início
++AFTER_S = 15 * 60                 # até 15 min depois do fim (volta, lavagem dos mops, início da secagem)
++SKIP = ("3/1", "10/1", "10/2")    # bateria e índices do mapa: só volume, nada sobre a rotina
++MAX_ROWS = 20000
++
++
++def _iso(epoch: int) -> str:
++    return iso(datetime.fromtimestamp(epoch, timezone.utc))
++
++
++def _name(key: str) -> str:
++    return catalog.PROPS[key].name if key in catalog.PROPS else ""
++
++
++def _changes(store: Store, start: str, end: str, skip=SKIP, prop: str | None = None) -> list[dict]:
++    where, args = ["ts >= ?", "ts <= ?"], [start, end]
++    if prop:
++        where.append("prop = ?")
++        args.append(prop)
++    elif skip:
++        where.append(f"prop NOT IN ({','.join('?' * len(skip))})")
++        args += list(skip)
++    rows = store._query(f"SELECT ts, prop, old_value, new_value FROM prop_change WHERE {' AND '.join(where)} "
++                        "ORDER BY id LIMIT ?", (*args, MAX_ROWS))
++    return [{"ts": r["ts"], "prop": r["prop"], "name": _name(r["prop"]), "old": r["old_value"], "new": r["new_value"]}
++            for r in rows]
++
++
++def _commands(store: Store, start: str, end: str) -> list[dict]:
++    return store._query("SELECT * FROM command_log WHERE ts >= ? AND ts <= ? ORDER BY id", (start, end))
++
++
++def build(store: Store, snapshot: dict, days: int, now: datetime | None = None) -> dict:
++    now = now or utcnow()
++    if days not in DAYS:
++        raise ValueError(f"período inválido: use {', '.join(map(str, DAYS))} dias")
++    since = now - timedelta(days=days)
++    since_iso, now_iso = iso(since), iso(now)
++    cleanings = []
++    for c in reversed(store.cleanings(start=int(since.timestamp()))):          # da mais antiga para a mais nova
++        end = c["stime"] + (c["duration_s"] or 0)
++        w0, w1 = _iso(c["stime"] - BEFORE_S), _iso(end + AFTER_S)
++        cleanings.append({
++            "start": _iso(c["stime"]), "duration_s": c["duration_s"], "area_m2": c["area_m2"],
++            "type": c["sweep_type"], "type_label": catalog.label("2/5", c["sweep_type"]) if c["sweep_type"] else None,
++            "rooms": c["rooms"], "label": c["raw_label"], "source": c["source"],
++            "window": [w0, w1], "changes": _changes(store, w0, w1), "commands": _commands(store, w0, w1)})
++    return {
++        "about": "Log temporário do H50 Console para estudar as rotinas com modos diferentes por cômodo. "
++                 "Horários em UTC.",
++        "generated_at": now_iso, "days": days, "since": since_iso,
++        "current": {k: {"name": _name(k), "value": v} for k, v in sorted(snapshot.items()) if k in catalog.PROPS},
++        "rooms": [{"map_uid": r["map_uid"], "id": r["id"], "name": r["name"]} for r in store.rooms()],
++        "cleanings": cleanings,
++        "all_2_40": _changes(store, since_iso, now_iso, prop="2/40"),
++        "all_2_42": _changes(store, since_iso, now_iso, prop="2/42"),
++        "commands": _commands(store, since_iso, now_iso),
++    }
++
++
++def export(store: Store, snapshot: dict, days: int) -> tuple[bytes, str]:
++    data = build(store, snapshot, days)
++    name = f"h50-log-limpezas-{datetime.now().strftime('%Y%m%d-%H%M')}.json"
++    return json.dumps(data, ensure_ascii=False, indent=1, default=str).encode("utf-8"), name
+diff --git a/h50console/static/index.html b/h50console/static/index.html
+index 04848e2..99a2f4d 100644
+--- a/h50console/static/index.html
++++ b/h50console/static/index.html
+@@ -226,6 +226,11 @@
+     <div id="t-faults"></div>
+     <h2>Comandos enviados</h2>
+     <div id="t-commands"></div>
++    <h2>Log das limpezas (temporário)</h2>
++    <div class="bar"><select id="tmp-log-days"><option value="7">7 dias</option><option value="30" selected>30 dias</option>
++      <option value="90">90 dias</option></select><button id="tmp-log-get">Baixar log das limpezas</button></div>
++    <p class="muted small">Para estudar as rotinas com modos diferentes por cômodo. Só lê o que o painel já guardou; não
++      manda nada ao robô. Sai numa próxima versão.</p>
+     <h2>Cômodos e móveis</h2>
+     <div id="t-rooms"></div>
+     <div id="t-furniture"></div>
+@@ -259,5 +264,6 @@
+ <script src="lab.js"></script>
+ <script src="notify.js"></script>
+ <script src="mapedit.js"></script>
++<script src="tmplog.js"></script>
+ </body>
+ </html>
+diff --git a/h50console/static/tmplog.js b/h50console/static/tmplog.js
+new file mode 100644
+index 0000000..25127d8
+--- /dev/null
++++ b/h50console/static/tmplog.js
+@@ -0,0 +1,6 @@
++// TEMPORÁRIO (patch 0006 do app): baixa o log das limpezas (Diagnóstico). Sai junto com o routine_log.py.
++(function () {
++  const H = window.H50;
++  H.$("#tmp-log-get").onclick = () => H.run("Log das limpezas",
++    () => H.download("GET", `/api/debug/cleaning-log.json?days=${H.$("#tmp-log-days").value}`));
++})();
+diff --git a/h50console/web.py b/h50console/web.py
+index 8e80455..634a0a3 100644
+--- a/h50console/web.py
++++ b/h50console/web.py
+@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from pathlib import Path
+ from urllib.parse import parse_qs, quote, urlparse
+ 
+-from . import catalog, dash, decoders, zones
++from . import catalog, dash, decoders, routine_log, zones
+ from .auth import AuthError, is_loopback
+ from .gateway import CommandBlocked, Gateway
+ from .miio import MiioError
+@@ -116,6 +116,7 @@ class App:
+             ("GET", r"/api/schedules", self.schedules),
+             ("GET", r"/api/commands", self.commands),
+             ("GET", r"/api/export/cleanings\.csv", self.export_cleanings),
++            ("GET", r"/api/debug/cleaning-log\.json", self.debug_cleaning_log),     # TEMPORÁRIO (patch 0006 do app)
+             ("GET", r"/api/lab/props", self.lab_props),
+             ("POST", r"/api/lab/read", self.lab_read),
+             ("GET", r"/api/lab/changes", self.lab_changes),
+@@ -342,6 +343,15 @@ class App:
+                         ";".join(names.get(i, str(i)) for i in r["rooms"]), r["source"], r["raw_label"] or ""])
+         return Raw(out.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8", "limpezas.csv")
+ 
++    def debug_cleaning_log(self, query, **_):
++        """TEMPORÁRIO (patch 0006 do app): log das limpezas com valores completos (ver routine_log)."""
++        try:
++            days = int(query.get("days", ["30"])[0])
++            data, name = routine_log.export(self.store, self.gw.cache.snapshot(), days)
++        except ValueError as e:
++            raise ApiError(400, str(e)) from None
++        return Raw(data, "application/json; charset=utf-8", name)
++
+     # -- Laboratório: explorar o que os manuais não dizem -------------------------------------------------------
+     @staticmethod
+     def _short(v, n: int = 240):
+diff --git a/tests/test_cleaning_log.py b/tests/test_cleaning_log.py
+new file mode 100644
+index 0000000..4d10afe
+--- /dev/null
++++ b/tests/test_cleaning_log.py
+@@ -0,0 +1,68 @@
++"""TEMPORÁRIO (patch 0006 do app): log das limpezas em Diagnóstico."""
++
++import json
++import tempfile
++import unittest
++from datetime import datetime, timedelta, timezone
++
++from h50console.fleet import Fleet, RobotConfig
++from h50console.hub import Hub
++from h50console.web import ApiError, Raw
++
++from .fake import FakeClient
++
++DID = "1000000001"
++ROUTINE = ('{"user_define":{"id":1788583425,"name":"Cômodos e cozin bife","user_data":[["mode","mop"],'
++           '[1,1],[3,3]]},"rooms":[3,7]}')
++
++
++class CleaningLog(unittest.TestCase):
++    def setUp(self):
++        tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(tmp.cleanup)
++        self.fleet = Fleet(tmp.name, None, client_factory=lambda cfg: FakeClient({"2/2": 2}), start_threads=False)
++        self.addCleanup(self.fleet.stop_all)
++        self.robot = self.fleet.add(RobotConfig(id="", name="Rex", did=DID), start=False)
++        self.hub = Hub(self.fleet, None)
++        st = self.robot.store
++        now = datetime.now(timezone.utc).replace(microsecond=0)
++        self.start = now - timedelta(days=2)
++        st.upsert_cleaning(int(self.start.timestamp()), 600, 20.5, 7, "derived", rooms=[3, 7],
++                           raw_label="custom:Cômodos e cozin bife")
++        st.save_changes({"2/40": (None, ROUTINE), "2/4": (1, 3), "3/1": (90, 89)}, ts=self.start + timedelta(seconds=30))
++        st.save_changes({"2/40": (ROUTINE, "{}")}, ts=self.start + timedelta(seconds=650))
++        st.save_changes({"2/2": (2, 9)}, ts=self.start + timedelta(hours=3))               # fora da janela
++        st.save_changes({"2/40": (None, "{}")}, ts=now - timedelta(days=40))               # fora dos 30 dias
++        st.log_command("ui", "action:2/16", [3], 0, 40)
++
++    def get(self, days="30"):
++        return self.hub.dispatch("GET", "/api/r/rex/debug/cleaning-log.json", {"days": [days]}, None)
++
++    def test_exports_each_cleaning_with_full_values(self):
++        out = self.get()
++        self.assertIsInstance(out, Raw)
++        self.assertTrue(out.filename.startswith("h50-log-limpezas-") and out.filename.endswith(".json"))
++        data = json.loads(out.data)
++        self.assertEqual(data["days"], 30)
++        [c] = data["cleanings"]
++        self.assertEqual(c["label"], "custom:Cômodos e cozin bife")
++        self.assertEqual(c["rooms"], [3, 7])
++        props = [ch["prop"] for ch in c["changes"]]
++        self.assertEqual(props.count("2/40"), 2)
++        self.assertIn("2/4", props)
++        self.assertNotIn("3/1", props)                                     # bateria fica de fora
++        self.assertNotIn("2/2", props)                                     # 3 h depois: fora da janela
++        self.assertEqual(next(ch["new"] for ch in c["changes"] if ch["prop"] == "2/40"), ROUTINE)  # sem cortar
++        self.assertEqual(len(data["all_2_40"]), 2)                         # a de 40 dias atrás não entra
++        self.assertEqual(data["commands"][0]["command"], "action:2/16")
++        self.assertIsInstance(data["current"], dict)
++
++    def test_ninety_days_reaches_older_changes_and_bad_period_is_refused(self):
++        self.assertEqual(len(json.loads(self.get("90").data)["all_2_40"]), 3)
++        with self.assertRaises(ApiError) as e:
++            self.get("365")
++        self.assertEqual(e.exception.status, 400)
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.53.0
+

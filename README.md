@@ -25,7 +25,7 @@ h50console/                # o app (slug h50console); é o contexto de build do 
   config.yaml build.yaml   # build.yaml → args.H50_COMMIT: commit do fork usado no build
   Dockerfile  run.py      # run.py lê as opções; com mqtt ligado, sobe o painel e a ponte
   mqtt_bridge.py tests/    # ponte MQTT (discovery) e os testes dela
-  patches/0001-…0005-…     # mudanças só do HA sobre o fork (git format-patch), aplicadas em ordem
+  patches/0001-…0006-…     # mudanças só do HA sobre o fork (git format-patch), aplicadas em ordem
 tools/update-upstream.sh   # move os patches para um commit novo do fork
 ```
 
@@ -37,7 +37,7 @@ O [Dockerfile](h50console/Dockerfile):
    (nunca sai uma imagem com o código pela metade);
 3. instala o pacote na imagem base Python do HA e sobe com `run.py`, que lê as opções do app.
 
-Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta exatamente como o fork):
+Os patches (0001 a 0005 são opt-in: sem as variáveis de ambiente, o painel se comporta exatamente como o fork):
 
 | Patch | O quê |
 |---|---|
@@ -46,6 +46,7 @@ Os patches (todos opt-in: sem as variáveis de ambiente, o painel se comporta ex
 | 0003 | Modo Ingress (`H50_INGRESS`, `H50_INGRESS_ONLY`) e `H50_LOG_LEVEL`, com testes |
 | 0004 | API local por token (`H50_API_TOKEN`, só de `127.0.0.1`), usada pela ponte MQTT, com testes |
 | 0005 | Perfil operador e perfis pelo usuário do HA no Ingress (`H50_INGRESS_ADMINS`, `H50_INGRESS_OTHERS`), inclusive nas zonas, com testes |
+| 0006 | **Temporário:** botão "Baixar log das limpezas" em Diagnóstico (só leitura do banco), para estudar as rotinas com modos diferentes por cômodo. Sai quando essa tarefa terminar |
 
 As melhorias do painel que valem para qualquer instalação (servidor da nuvem fixo, rotinas com o modo de limpeza,
 limpeza por zona, zoom no mapa, secagem, rede local mais estável, confirmação de saída da base, percurso e mapa durante
